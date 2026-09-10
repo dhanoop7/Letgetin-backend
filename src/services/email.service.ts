@@ -64,7 +64,7 @@ export class EmailService {
 
     try {
       await new Promise<boolean>((resolve, reject) => {
-        transporter.verify((err, success) => {
+        transporter.verify((err: any, success: any) => {
           if (err) {
             reject(err);
           } else {
@@ -91,12 +91,12 @@ export class EmailService {
     }
 
     return new Promise<SentMessageInfo>((resolve, reject) => {
-      transporter.sendMail(mailData, (err, info) => {
+      transporter.sendMail(mailData, (err: any, info: any) => {
         if (err) {
           console.error('[EMAIL SERVICE] ❌ Nodemailer delivery error:', err);
           reject(err);
         } else {
-          resolve(info);
+          resolve(info as SentMessageInfo);
         }
       });
     });
@@ -208,12 +208,12 @@ export class EmailService {
 
     try {
       const info = await new Promise<SentMessageInfo>((resolve, reject) => {
-        transporter.sendMail(mailData, (err, info) => {
+        transporter.sendMail(mailData, (err: any, info: any) => {
           if (err) {
             console.error(`[EMAIL SERVICE] ❌ Error sending email to ${normalizedEmail}:`, err);
             reject(err);
           } else {
-            resolve(info);
+            resolve(info as SentMessageInfo);
           }
         });
       });

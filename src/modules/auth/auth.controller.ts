@@ -30,26 +30,33 @@ const parseDurationToMs = (durationStr: string | undefined, defaultMs: number): 
 const ACCESS_TOKEN_MAX_AGE = parseDurationToMs(env.JWT_ACCESS_EXPIRES_IN, 15 * 60 * 1000);
 const REFRESH_TOKEN_MAX_AGE = parseDurationToMs(env.JWT_REFRESH_EXPIRES_IN, 30 * 24 * 60 * 60 * 1000);
 
+const isCrossSite =
+  env.NODE_ENV === 'production' ||
+  process.env.RENDER === 'true' ||
+  Boolean(process.env.RENDER) ||
+  (Boolean(env.CLIENT_URL) && env.CLIENT_URL.includes('vercel.app')) ||
+  (Boolean(env.CLIENT_URL) && env.CLIENT_URL.startsWith('https://'));
+
 export const COOKIE_OPTIONS_REFRESH = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction ? ('none' as const) : ('lax' as const),
+  secure: isCrossSite,
+  sameSite: isCrossSite ? ('none' as const) : ('lax' as const),
   maxAge: REFRESH_TOKEN_MAX_AGE,
   path: '/',
 };
 
 export const COOKIE_OPTIONS_ACCESS = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction ? ('none' as const) : ('lax' as const),
+  secure: isCrossSite,
+  sameSite: isCrossSite ? ('none' as const) : ('lax' as const),
   maxAge: ACCESS_TOKEN_MAX_AGE,
   path: '/',
 };
 
 export const CLEAR_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: isProduction,
-  sameSite: isProduction ? ('none' as const) : ('lax' as const),
+  secure: isCrossSite,
+  sameSite: isCrossSite ? ('none' as const) : ('lax' as const),
   path: '/',
 };
 

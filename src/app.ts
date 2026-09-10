@@ -20,6 +20,8 @@ import tailoringRoutes from './modules/tailoring/tailoring.routes.js';
 import recruiterOrgRoutes from './modules/recruiterOrg/recruiterOrg.routes.js';
 import recruiterCreditsRoutes from './modules/recruiterCredits/recruiterCredits.routes.js';
 import institutionRoutes from './modules/institution/institution.routes.js';
+import taskRoutes from './modules/task/task.routes.js';
+import noteRoutes from './modules/note/note.routes.js';
 
 export const createApp = (): Express => {
   const app = express();
@@ -97,6 +99,8 @@ export const createApp = (): Express => {
   app.use('/api/recruiter', recruiterOrgRoutes);
   app.use('/api/recruiter', recruiterCreditsRoutes);
   app.use('/api/institution', institutionRoutes);
+  app.use('/api/tasks', taskRoutes);
+  app.use('/api/notes', noteRoutes);
 
   // Centralized error handler
   app.use(errorHandler);

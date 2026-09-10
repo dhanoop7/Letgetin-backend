@@ -40,31 +40,35 @@ export const createApp = (): Express => {
     'http://127.0.0.1:3001',
     'http://localhost:5173',
     'https://let-get-in-frontend.vercel.app',
+    'https://letgetin-frontend-beta.vercel.app',
   ];
   if (env.CLIENT_URL) {
     allowedOrigins.push(env.CLIENT_URL.trim().replace(/\/$/, ''));
   }
 
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        const isAllowed =
-          allowedOrigins.includes(origin) ||
-          origin.startsWith('http://localhost:') ||
-          origin.startsWith('http://127.0.0.1:') ||
-          (env.NODE_ENV === 'production' && origin.endsWith('.vercel.app'));
+  const corsOptions = {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin) return callback(null, true);
+      const isAllowed =
+        allowedOrigins.includes(origin) ||
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:') ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('vercel.app');
 
-        if (isAllowed) {
-          return callback(null, true);
-        }
-        return callback(new Error('CORS policy: Request origin not allowed'), false);
-      },
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    })
-  );
+      if (isAllowed) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    optionsSuccessStatus: 200,
+  };
+
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
 
   // Body Parsing
   app.use(express.json({ limit: '10mb' }));

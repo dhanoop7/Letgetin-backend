@@ -23,6 +23,7 @@ import institutionRoutes from './modules/institution/institution.routes.js';
 import taskRoutes from './modules/task/task.routes.js';
 import noteRoutes from './modules/note/note.routes.js';
 import networkRoutes from './modules/network/network.routes.js';
+import interviewRoutes from './modules/interview/interview.routes.js';
 
 export const createApp = (): Express => {
   const app = express();
@@ -107,6 +108,7 @@ export const createApp = (): Express => {
   app.use('/api/tasks', taskRoutes);
   app.use('/api/notes', noteRoutes);
   app.use('/api/network', networkRoutes);
+  app.use('/api/interviews', interviewRoutes);
 
   // Centralized error handler
   app.use(errorHandler);

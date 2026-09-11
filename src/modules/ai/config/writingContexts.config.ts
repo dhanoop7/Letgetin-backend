@@ -10,6 +10,19 @@ export type AIWritingAction =
   | 'shorten'
   | 'grammar'
   | 'simplify'
+  | 'humanize'
+  | 'tone-formal'
+  | 'tone-friendly'
+  | 'tone-persuasive'
+  | 'tone-confident'
+  | 'translate-es'
+  | 'translate-fr'
+  | 'translate-de'
+  | 'translate-hi'
+  | 'translate-zh'
+  | 'translate-ja'
+  | 'summarize'
+  | 'analyze'
   | 'generate'
   | 'custom'
   | 'ats-optimize'
@@ -22,6 +35,7 @@ export type AIWritingContext =
   | 'company-about'
   | 'startup-about'
   | 'institution-about'
+  | 'candidate-bio'
   | 'resume-summary'
   | 'resume-experience'
   | 'resume-project'
@@ -35,34 +49,66 @@ export interface WritingContextConfig {
   allowedMetadataKeys: string[];
 }
 
+const QUILLBOT_FULL_ACTIONS: AIWritingAction[] = [
+  'improve',
+  'rewrite',
+  'professional',
+  'grammar',
+  'simplify',
+  'expand',
+  'shorten',
+  'humanize',
+  'tone-formal',
+  'tone-friendly',
+  'tone-persuasive',
+  'tone-confident',
+  'translate-es',
+  'translate-fr',
+  'translate-de',
+  'translate-hi',
+  'translate-zh',
+  'translate-ja',
+  'summarize',
+  'analyze',
+  'custom',
+  'generate',
+];
+
 export const WRITING_CONTEXTS: Record<AIWritingContext, WritingContextConfig> = {
   'job-description': {
     label: 'Job Description',
-    allowedActions: ['improve', 'rewrite', 'expand', 'shorten', 'professional', 'custom'],
+    allowedActions: QUILLBOT_FULL_ACTIONS,
     instructionFragment:
       "You are refining a job description posted on a hiring platform. Keep it clear, inclusive, and professional.",
     allowedMetadataKeys: ['jobTitle'],
   },
   'company-about': {
     label: 'About Company',
-    allowedActions: ['improve', 'professional', 'expand', 'rewrite'],
+    allowedActions: QUILLBOT_FULL_ACTIONS,
     instructionFragment:
       "You are writing the 'About' section of a company's public profile. Keep it concise and credible.",
     allowedMetadataKeys: ['companyName', 'industry'],
   },
   'startup-about': {
     label: 'About Startup',
-    allowedActions: ['improve', 'professional', 'expand', 'rewrite'],
+    allowedActions: QUILLBOT_FULL_ACTIONS,
     instructionFragment:
       "You are writing the 'About' section of a startup's public profile. Keep an energetic but credible tone.",
     allowedMetadataKeys: ['companyName', 'industry'],
   },
   'institution-about': {
     label: 'About Institution',
-    allowedActions: ['improve', 'professional', 'expand', 'rewrite'],
+    allowedActions: QUILLBOT_FULL_ACTIONS,
     instructionFragment:
       "You are writing the 'About' section of an educational institution's public profile. Keep a trustworthy, academic tone.",
     allowedMetadataKeys: ['companyName'],
+  },
+  'candidate-bio': {
+    label: 'Candidate Bio',
+    allowedActions: QUILLBOT_FULL_ACTIONS,
+    instructionFragment:
+      "You are refining a candidate's personal bio/about profile summary for potential recruiters. Keep it authentic, engaging, concise, and professional.",
+    allowedMetadataKeys: ['fullName', 'targetRole'],
   },
   'resume-summary': {
     label: 'Resume Summary',

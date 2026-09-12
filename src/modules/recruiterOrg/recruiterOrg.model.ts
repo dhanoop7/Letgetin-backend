@@ -2,6 +2,49 @@ import { Schema, model, Document, Types } from 'mongoose';
 
 export type EntityType = 'company' | 'institution' | 'startup';
 
+export interface IFundraisingProfile {
+  fundingStage?: 'idea' | 'pre-seed' | 'seed' | 'series-a' | 'series-b' | 'series-c+';
+  fundraisingStatus?: 'active' | 'closed' | 'upcoming' | 'paused';
+  targetAmount?: number;
+  raisedAmount?: number;
+  committedAmount?: number;
+  minInvestment?: number;
+  maxInvestment?: number;
+  valuationCap?: number;
+  previousFunding?: number;
+  currency?: string;
+  roundName?: string;
+  closeDate?: string;
+  instrument?: string;
+  startupSlug?: string;
+  revenue?: string;
+  mrr?: number;
+  arr?: number;
+  growthRate?: string;
+  customerCount?: number;
+  traction?: string;
+  businessModel?: string;
+  targetMarket?: string;
+  tam?: string;
+  sam?: string;
+  som?: string;
+  competitiveAdvantage?: string;
+  pitchDeckUrl?: string;
+  activePitchDeckId?: string;
+  foundersList?: Array<{
+    name: string;
+    role: string;
+    linkedinUrl?: string;
+    bio?: string;
+  }>;
+  preferences?: {
+    preferredInvestorTypes?: string[];
+    preferredGeographies?: string[];
+    preferredSectors?: string[];
+    preferredTicketSize?: string;
+  };
+}
+
 export interface IRecruiterOrganizationDocument extends Document {
   ownerUserId: Types.ObjectId;
   entity: EntityType;
@@ -36,6 +79,7 @@ export interface IRecruiterOrganizationDocument extends Document {
   productDetails?: string;
   productLink?: string;
   fundraiser?: string;
+  fundraisingProfile?: IFundraisingProfile;
   // Institution Specific Fields (HTML Specification)
   mission?: string;
   vision?: string;
@@ -118,6 +162,50 @@ const RecruiterOrganizationSchema = new Schema<IRecruiterOrganizationDocument>(
     productDetails: { type: String, default: '' },
     productLink: { type: String, default: '' },
     fundraiser: { type: String, default: '' },
+    fundraisingProfile: {
+      fundingStage: { type: String, default: 'seed' },
+      fundraisingStatus: { type: String, default: 'active' },
+      targetAmount: { type: Number, default: 2000000 },
+      raisedAmount: { type: Number, default: 750000 },
+      committedAmount: { type: Number, default: 750000 },
+      minInvestment: { type: Number, default: 50000 },
+      maxInvestment: { type: Number, default: 1000000 },
+      valuationCap: { type: Number, default: 12000000 },
+      previousFunding: { type: Number, default: 250000 },
+      currency: { type: String, default: '$' },
+      roundName: { type: String, default: 'Seed Round' },
+      closeDate: { type: String, default: 'Nov 30, 2026' },
+      instrument: { type: String, default: 'Post-Money SAFE (with MFN)' },
+      startupSlug: { type: String, default: '' },
+      revenue: { type: String, default: '' },
+      mrr: { type: Number, default: 0 },
+      arr: { type: Number, default: 0 },
+      growthRate: { type: String, default: '' },
+      customerCount: { type: Number, default: 0 },
+      traction: { type: String, default: '' },
+      businessModel: { type: String, default: 'B2B SaaS' },
+      targetMarket: { type: String, default: '' },
+      tam: { type: String, default: '' },
+      sam: { type: String, default: '' },
+      som: { type: String, default: '' },
+      competitiveAdvantage: { type: String, default: '' },
+      pitchDeckUrl: { type: String, default: '' },
+      activePitchDeckId: { type: String, default: '' },
+      foundersList: [
+        {
+          name: { type: String, default: '' },
+          role: { type: String, default: '' },
+          linkedinUrl: { type: String, default: '' },
+          bio: { type: String, default: '' },
+        },
+      ],
+      preferences: {
+        preferredInvestorTypes: [{ type: String }],
+        preferredGeographies: [{ type: String }],
+        preferredSectors: [{ type: String }],
+        preferredTicketSize: { type: String, default: '' },
+      },
+    },
     // Institution Specific Fields
     mission: { type: String, default: '' },
     vision: { type: String, default: '' },

@@ -1,7 +1,8 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review';
+export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
 export type FunnelConfigStatus = 'draft' | 'active' | 'completed' | 'paused';
+export type FunnelHealth = 'healthy' | 'constrained' | 'starved';
 
 export interface IFunnelStage {
   stageId: string;
@@ -21,6 +22,10 @@ export interface IHiringFunnelConfigDocument extends Document {
   orgId?: Types.ObjectId;
   finalShortlistTarget: number;
   stages: IFunnelStage[];
+  idealStages?: IFunnelStage[];
+  idealFunnelIntakeTarget?: number;
+  isAdaptive?: boolean;
+  funnelHealth?: FunnelHealth;
   status: FunnelConfigStatus;
   totalFunnelIntakeTarget: number;
   currentShortlistedCount: number;
@@ -35,7 +40,7 @@ const FunnelStageSchema = new Schema<IFunnelStage>(
     stageName: { type: String, required: true, trim: true },
     stageType: {
       type: String,
-      enum: ['resume_match', 'assessment', 'ai_interview', 'manual_review'],
+      enum: ['resume_match', 'assessment', 'ai_interview', 'manual_review', 'human_interview'],
       required: true,
     },
     order: { type: Number, required: true },
@@ -55,6 +60,14 @@ const HiringFunnelConfigSchema = new Schema<IHiringFunnelConfigDocument>(
     orgId: { type: Schema.Types.ObjectId, ref: 'RecruiterOrg', index: true },
     finalShortlistTarget: { type: Number, required: true, min: 1 },
     stages: { type: [FunnelStageSchema], required: true },
+    idealStages: { type: [FunnelStageSchema], default: undefined },
+    idealFunnelIntakeTarget: { type: Number },
+    isAdaptive: { type: Boolean, default: false },
+    funnelHealth: {
+      type: String,
+      enum: ['healthy', 'constrained', 'starved'],
+      default: 'healthy',
+    },
     status: {
       type: String,
       enum: ['draft', 'active', 'completed', 'paused'],

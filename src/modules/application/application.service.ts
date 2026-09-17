@@ -10,6 +10,7 @@ import { HiringEngineService } from '../hiringEngine/services/hiringEngine.servi
 import { HiringPoolManager } from '../hiringEngine/services/hiringPoolManager.js';
 import { scheduleCandidateDeadlineCheck } from '../hiringEngine/queues/hiringEngine.queue.js';
 import { HiringNotificationHook } from '../hiringEngine/notifications/hiringNotification.hook.js';
+import { ApplicationCollectionService } from '../hiringEngine/services/applicationCollection.service.js';
 
 export interface ApplicationQueryFilters {
   page?: number;
@@ -331,6 +332,11 @@ export class ApplicationService {
         source: (populatedExisting as any)?.source || existing.source,
         status: (populatedExisting as any)?.status || existing.status,
         matchScore: (populatedExisting as any)?.matchScore || existing.matchScore || 0,
+        poolType: (populatedExisting as any)?.poolType || existing.poolType,
+        currentStageId: (populatedExisting as any)?.currentStageId || existing.currentStageId,
+        currentStageIndex: (populatedExisting as any)?.currentStageIndex || existing.currentStageIndex,
+        stageStatus: (populatedExisting as any)?.stageStatus || existing.stageStatus,
+        stageDeadline: (populatedExisting as any)?.stageDeadline || existing.stageDeadline,
         notes: (populatedExisting as any)?.notes || existing.notes || '',
         appliedAt: (populatedExisting as any)?.appliedAt || existing.appliedAt,
         createdAt: (populatedExisting as any)?.createdAt || existing.createdAt,
@@ -346,37 +352,58 @@ export class ApplicationService {
     let initialStageDeadline: Date | undefined;
     let computedMatchScore = data.matchScore || 78;
 
+    const isCollectionPhase =
+      jobDoc?.applicationCollection &&
+      ['collecting', 'ready', 'extended', 'insufficient'].includes(jobDoc.applicationCollection.status);
+
     if (jobDoc?.hiringEngineEnabled) {
       try {
-        const config = await HiringFunnelConfigModel.findOne({ jobId: jobObjectId });
-        if (config && config.stages && config.stages.length > 0 && config.status === 'active') {
-          const stage1 = config.stages[0];
-          initialStageId = stage1.stageId;
-          initialStageIndex = stage1.order;
+        // Calculate composite score using candidate profile + job skills
+        computedMatchScore = await HiringPoolManager.computeOrGetCompositeScore(
+          { userId: userObjectId, matchScore: data.matchScore } as any,
+          jobDoc.skills || [],
+          jobDoc.embedding
+        );
 
-          // Compute composite score using candidate profile + job skills
-          computedMatchScore = await HiringPoolManager.computeOrGetCompositeScore(
-            { userId: userObjectId, matchScore: data.matchScore } as any,
-            jobDoc.skills || [],
-            jobDoc.embedding
-          );
+        if (isCollectionPhase) {
+          // During candidate collection phase, candidates are not partitioned into primary/reserve yet
+          initialPoolType = undefined;
+          initialStageStatus = undefined;
+          initialStageId = undefined;
+          initialStageIndex = undefined;
+          initialStageDeadline = undefined;
+        } else {
+          // Post-pipeline start or direct pipeline:
+          const config = await HiringFunnelConfigModel.findOne({ jobId: jobObjectId });
+          if (config && config.stages && config.stages.length > 0 && config.status === 'active') {
+            const stage1 = config.stages[0];
+            initialStageId = stage1.stageId;
+            initialStageIndex = stage1.order;
 
-          // Count active primary candidates in stage 1
-          const activePrimaryCount = await ApplicationModel.countDocuments({
-            jobId: jobObjectId,
-            currentStageId: stage1.stageId,
-            poolType: 'primary',
-            stageStatus: { $in: ['invited', 'started', 'passed'] },
-          });
+            if (jobDoc.applicationCollection?.status === 'started') {
+              // Section 15: Candidates arriving after pipeline start enter Reserve pool directly
+              initialPoolType = 'reserve';
+              initialStageStatus = undefined;
+              initialStageDeadline = undefined;
+            } else {
+              // Legacy direct-pipeline fallback
+              const activePrimaryCount = await ApplicationModel.countDocuments({
+                jobId: jobObjectId,
+                currentStageId: stage1.stageId,
+                poolType: 'primary',
+                stageStatus: { $in: ['invited', 'started', 'passed'] },
+              });
 
-          if (activePrimaryCount < stage1.targetCount) {
-            initialPoolType = 'primary';
-            initialStageStatus = 'invited';
-            const deadlineHours = stage1.deadlineHours || 48;
-            initialStageDeadline = new Date(Date.now() + deadlineHours * 3600 * 1000);
-          } else {
-            initialPoolType = 'reserve';
-            initialStageStatus = undefined;
+              if (activePrimaryCount < stage1.targetCount) {
+                initialPoolType = 'primary';
+                initialStageStatus = 'invited';
+                const deadlineHours = stage1.deadlineHours || 48;
+                initialStageDeadline = new Date(Date.now() + deadlineHours * 3600 * 1000);
+              } else {
+                initialPoolType = 'reserve';
+                initialStageStatus = undefined;
+              }
+            }
           }
         }
       } catch (err) {
@@ -404,6 +431,15 @@ export class ApplicationService {
       notes: data.notes || '',
       appliedAt: new Date(),
     });
+
+    // If job is in collection phase, trigger readiness evaluation (auto-starts if autoStartEnabled & min reached)
+    if (isCollectionPhase) {
+      try {
+        await ApplicationCollectionService.evaluateCollectionReadiness(jobObjectId);
+      } catch (err) {
+        console.error('[ApplicationService] Error evaluating collection readiness:', err);
+      }
+    }
 
     if (initialPoolType === 'primary' && initialStageId) {
       try {
@@ -486,6 +522,11 @@ export class ApplicationService {
       source: (populated as any)?.source || data.source || 'manual',
       status: (populated as any)?.status || data.status || 'submitted',
       matchScore: (populated as any)?.matchScore || data.matchScore || 78,
+      poolType: (populated as any)?.poolType || newApp.poolType,
+      currentStageId: (populated as any)?.currentStageId || newApp.currentStageId,
+      currentStageIndex: (populated as any)?.currentStageIndex || newApp.currentStageIndex,
+      stageStatus: (populated as any)?.stageStatus || newApp.stageStatus,
+      stageDeadline: (populated as any)?.stageDeadline || newApp.stageDeadline,
       notes: (populated as any)?.notes || data.notes || '',
       appliedAt: (populated as any)?.appliedAt || new Date(),
       createdAt: (populated as any)?.createdAt || new Date(),

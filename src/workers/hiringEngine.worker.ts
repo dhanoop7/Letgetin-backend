@@ -5,6 +5,7 @@ import {
 } from '../modules/hiringEngine/queues/hiringEngine.queue.js';
 import { getRedisConnectionOptions } from '../queues/queue.config.js';
 import { HiringEngineService } from '../modules/hiringEngine/services/hiringEngine.service.js';
+import { ApplicationCollectionService } from '../modules/hiringEngine/services/applicationCollection.service.js';
 
 const redisOptions = getRedisConnectionOptions();
 
@@ -45,6 +46,14 @@ export const createHiringEngineWorker = (): Worker<HiringEnginePayload> => {
               `[HiringEngineWorker] Evaluation processed for App ${data.applicationId}: status=${evalResult.status}`
             );
             return { success: true, ...evalResult };
+          }
+
+          case 'check-application-collection-deadline': {
+            const collResult = await ApplicationCollectionService.processCollectionDeadlineJob(data.jobId);
+            console.log(
+              `[HiringEngineWorker] Collection deadline processed for Job ${data.jobId}: action=${collResult.action}`
+            );
+            return { success: true, ...collResult };
           }
 
           default: {

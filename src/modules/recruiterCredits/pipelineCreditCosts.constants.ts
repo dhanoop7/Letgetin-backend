@@ -76,6 +76,9 @@ export interface PipelineSelection {
   assessmentTypes?: string[];
   aiInterview?: boolean;
   aiInterviewTypes?: string[];
+  humanInterview?: boolean;
+  humanInterviewTypes?: string[];
+  roundOrder?: string[];
 }
 
 export interface SanitizedPipelineOptions {
@@ -86,6 +89,9 @@ export interface SanitizedPipelineOptions {
   assessmentTypes: string[];
   aiInterview: boolean;
   aiInterviewTypes: string[];
+  humanInterview?: boolean;
+  humanInterviewTypes?: string[];
+  roundOrder?: string[];
 }
 
 /**
@@ -119,6 +125,8 @@ export function sanitizePipelineSelection(input?: PipelineSelection): SanitizedP
   const resumeMatchTypes = filterKeys('resumeMatch', input?.resumeMatch, input?.resumeMatchTypes);
   const assessmentTypes = filterKeys('assessment', input?.assessment, input?.assessmentTypes);
   const aiInterviewTypes = filterKeys('aiInterview', input?.aiInterview, input?.aiInterviewTypes);
+  const humanInterviewTypes = Array.isArray(input?.humanInterviewTypes) ? input.humanInterviewTypes : [];
+  const roundOrder = Array.isArray(input?.roundOrder) ? input.roundOrder : undefined;
 
   return {
     matchVolume,
@@ -128,6 +136,9 @@ export function sanitizePipelineSelection(input?: PipelineSelection): SanitizedP
     assessmentTypes,
     aiInterview: aiInterviewTypes.length > 0,
     aiInterviewTypes,
+    humanInterview: !!input?.humanInterview || humanInterviewTypes.length > 0,
+    humanInterviewTypes,
+    roundOrder,
   };
 }
 

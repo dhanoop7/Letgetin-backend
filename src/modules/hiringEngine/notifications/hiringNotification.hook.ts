@@ -49,6 +49,37 @@ export interface CandidateShortlistedNotification {
   targetCount: number;
 }
 
+export interface CollectionExtendedNotification {
+  recruiterId?: string;
+  jobId: string;
+  jobTitle: string;
+  qualifiedCandidates: number;
+  minimumRequired: number;
+  newDeadline: Date;
+  extensionsUsed: number;
+  maxExtensions: number;
+}
+
+export interface CollectionInsufficientNotification {
+  recruiterId?: string;
+  jobId: string;
+  jobTitle: string;
+  qualifiedCandidates: number;
+  minimumRequired: number;
+  finalShortlistTarget: number;
+  idealIntake: number;
+  extensionsUsed: number;
+}
+
+export interface CollectionReadyNotification {
+  recruiterId?: string;
+  jobId: string;
+  jobTitle: string;
+  qualifiedCandidates: number;
+  minimumRequired: number;
+  idealIntake: number;
+}
+
 class HiringNotificationHookEmitter extends EventEmitter {
   constructor() {
     super();
@@ -82,6 +113,24 @@ class HiringNotificationHookEmitter extends EventEmitter {
         `🏆 [HiringNotificationHook] Candidate "${data.candidateId}" reached FINAL SHORTLIST for role "${data.jobTitle}" (${data.totalShortlisted}/${data.targetCount})`
       );
     });
+
+    this.on('collectionExtended', (data: CollectionExtendedNotification) => {
+      console.log(
+        `⏳ [HiringNotificationHook] Candidate collection extended for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired}, NewDeadline=${data.newDeadline.toISOString()}, Extensions=${data.extensionsUsed}/${data.maxExtensions}`
+      );
+    });
+
+    this.on('collectionInsufficient', (data: CollectionInsufficientNotification) => {
+      console.log(
+        `⚠️ [HiringNotificationHook] Insufficient qualified candidates for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired} (Final Target: ${data.finalShortlistTarget})`
+      );
+    });
+
+    this.on('collectionReady', (data: CollectionReadyNotification) => {
+      console.log(
+        `🚀 [HiringNotificationHook] Candidate collection ready for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired} (Ideal: ${data.idealIntake})`
+      );
+    });
   }
 
   public notifyCandidateInvited(data: CandidateInvitedNotification): void {
@@ -102,6 +151,18 @@ class HiringNotificationHookEmitter extends EventEmitter {
 
   public notifyCandidateShortlisted(data: CandidateShortlistedNotification): void {
     this.emit('candidateShortlisted', data);
+  }
+
+  public notifyCollectionExtended(data: CollectionExtendedNotification): void {
+    this.emit('collectionExtended', data);
+  }
+
+  public notifyCollectionInsufficient(data: CollectionInsufficientNotification): void {
+    this.emit('collectionInsufficient', data);
+  }
+
+  public notifyCollectionReady(data: CollectionReadyNotification): void {
+    this.emit('collectionReady', data);
   }
 }
 

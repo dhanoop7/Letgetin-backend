@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { AppError } from '../../../utils/appError.js';
 import { JobModel } from '../../job/job.model.js';
 import { ApplicationModel, IApplicationDocument } from '../../application/application.model.js';
+import { UserModel } from '../../user/user.model.js';
+import { ResumeModel } from '../../resume/resume.model.js';
 import {
   HiringFunnelConfigModel,
   IHiringFunnelConfigDocument,
@@ -209,10 +211,33 @@ export class HiringEngineService {
    * Retrieves the current HiringFunnelConfig for a job.
    */
   public static async getFunnelConfig(jobId: string, recruiterUserId: string): Promise<IHiringFunnelConfigDocument> {
-    await this.verifyJobOwnership(jobId, recruiterUserId);
-    const config = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+    const job = await this.verifyJobOwnership(jobId, recruiterUserId);
+    let config: any = await HiringFunnelConfigModel.findOne({ jobId }).lean();
     if (!config) {
-      throw AppError.notFound('Hiring funnel configuration has not been initialized for this job.');
+      const { ApplicationCollectionService } = await import('./applicationCollection.service.js');
+      const stages = ApplicationCollectionService.deriveStagesFromJob(job);
+      const targetCount = job.finalShortlistTarget || 5;
+      const calculation = HiringFunnelCalculator.calculateFunnel(targetCount, stages);
+
+      const created = await HiringFunnelConfigModel.create({
+        jobId: job._id,
+        orgId: job.orgId,
+        finalShortlistTarget: targetCount,
+        stages: calculation.stages,
+        idealStages: calculation.stages,
+        idealFunnelIntakeTarget: calculation.totalFunnelIntakeTarget,
+        totalFunnelIntakeTarget: calculation.totalFunnelIntakeTarget,
+        currentShortlistedCount: 0,
+        status: job.status === 'active' ? 'active' : 'draft',
+        funnelHealth: 'healthy',
+        lastCalculatedAt: new Date(),
+      });
+
+      job.hiringEngineEnabled = true;
+      job.hiringEngineConfigId = created._id as Types.ObjectId;
+      await job.save();
+
+      config = created.toObject();
     }
     return config as unknown as IHiringFunnelConfigDocument;
   }
@@ -222,10 +247,33 @@ export class HiringEngineService {
    */
   public static async getFunnelMetrics(jobId: string, recruiterUserId: string): Promise<FunnelMetricsReport> {
     const job = await this.verifyJobOwnership(jobId, recruiterUserId);
-    const config = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+    let config: any = await HiringFunnelConfigModel.findOne({ jobId }).lean();
 
     if (!config) {
-      throw AppError.notFound('Hiring funnel configuration not found for this job.');
+      const { ApplicationCollectionService } = await import('./applicationCollection.service.js');
+      const stages = ApplicationCollectionService.deriveStagesFromJob(job);
+      const targetCount = job.finalShortlistTarget || 5;
+      const calculation = HiringFunnelCalculator.calculateFunnel(targetCount, stages);
+
+      const created = await HiringFunnelConfigModel.create({
+        jobId: job._id,
+        orgId: job.orgId,
+        finalShortlistTarget: targetCount,
+        stages: calculation.stages,
+        idealStages: calculation.stages,
+        idealFunnelIntakeTarget: calculation.totalFunnelIntakeTarget,
+        totalFunnelIntakeTarget: calculation.totalFunnelIntakeTarget,
+        currentShortlistedCount: 0,
+        status: job.status === 'active' ? 'active' : 'draft',
+        funnelHealth: 'healthy',
+        lastCalculatedAt: new Date(),
+      });
+
+      job.hiringEngineEnabled = true;
+      job.hiringEngineConfigId = created._id as Types.ObjectId;
+      await job.save();
+
+      config = created.toObject();
     }
 
     const allApplications = await ApplicationModel.find({ jobId }).lean();
@@ -311,17 +359,22 @@ export class HiringEngineService {
       currentStageId: stageId,
       poolType: 'primary',
     })
-      .populate('userId', 'fullName username email phone avatarUrl')
-      .populate('resumeId', 'title atsScore createdAt')
+      .populate({ path: 'userId', model: UserModel, select: 'fullName username email phone avatarUrl' })
+      .populate({ path: 'resumeId', model: ResumeModel, select: 'title atsScore createdAt' })
       .sort({ compositeRank: -1, appliedAt: 1 })
       .lean();
 
     const reserve = await ApplicationModel.find({
       jobId,
-      poolType: 'reserve',
+      $or: [
+        { poolType: 'reserve' },
+        { poolType: { $exists: false } },
+        { poolType: null },
+      ],
+      status: { $nin: ['rejected', 'failed'] },
     })
-      .populate('userId', 'fullName username email phone avatarUrl')
-      .populate('resumeId', 'title atsScore createdAt')
+      .populate({ path: 'userId', model: UserModel, select: 'fullName username email phone avatarUrl' })
+      .populate({ path: 'resumeId', model: ResumeModel, select: 'title atsScore createdAt' })
       .sort({ compositeRank: -1, appliedAt: 1 })
       .lean();
 
@@ -440,7 +493,7 @@ export class HiringEngineService {
     application.currentStageId = nextStage.stageId;
     application.stageStatus = 'invited';
     // Sync ATS status with pipeline stage type
-    if (nextStage.stageType === 'ai_interview') {
+    if (nextStage.stageType === 'ai_interview' || nextStage.stageType === 'human_interview') {
       application.status = 'interviewing';
     } else if (nextStage.stageType === 'assessment') {
       application.status = 'reviewing';

@@ -46,4 +46,10 @@ router.post('/stages/:stageId/refill', validate(refillStageSchema), HiringEngine
 // Candidate Stage Transition Audit History
 router.get('/candidates/:applicationId/history', HiringEngineController.getCandidateHistory);
 
+// Application Collection & Adaptive Pipeline
+router.get('/application-collection', HiringEngineController.getApplicationCollection);
+router.post('/application-collection/start', HiringEngineController.startApplicationCollection);
+router.post('/application-collection/extend', HiringEngineController.extendApplicationCollection);
+router.post('/start', HiringEngineController.startApplicationCollection);
+
 export default router;

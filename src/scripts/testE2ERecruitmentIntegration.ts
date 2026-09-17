@@ -659,12 +659,17 @@ async function runE2EIntegrationTestSuite() {
 
     const intakeConfig = await HiringFunnelConfigModel.findOne({ jobId: intakeJob._id });
     if (intakeConfig && intakeConfig.stages.length > 0) {
+      intakeConfig.status = 'active';
       intakeConfig.stages[0].targetCount = 1;
       intakeConfig.stages[0].expectedAttendanceRate = 1.0;
       intakeConfig.stages[0].expectedPassRate = 1.0;
       intakeConfig.stages[0].autoAdvanceScoreThreshold = 75;
       await intakeConfig.save();
     }
+    await JobModel.findByIdAndUpdate(intakeJob._id, {
+      $unset: { applicationCollection: 1 },
+      hiringEngineEnabled: true,
+    });
 
     const candidateUser7 = await UserModel.create({
       email: `candidate_postpub_1_${Date.now()}@letgetin.io`,

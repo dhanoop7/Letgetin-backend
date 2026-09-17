@@ -14,6 +14,15 @@ export const createJobSchema = z.object({
     deadline: z.string().optional(),
     saveAsDraft: z.boolean().optional().default(false),
     finalShortlistTarget: z.number().int().min(1).max(500).optional(),
+    idealIntake: z.number().int().min(1).optional(),
+    minimumIntake: z.number().int().min(1).optional(),
+    collectionDurationDays: z.number().int().min(1).optional(),
+    autoExtensionEnabled: z.boolean().optional(),
+    extensionDurationDays: z.number().int().min(1).optional(),
+    maxExtensions: z.number().int().min(0).optional(),
+    autoStartEnabled: z.boolean().optional(),
+    rounds: z.array(z.string()).optional(),
+    stages: z.array(z.any()).optional(),
     pipelineOptions: z
       .object({
         matchVolume: z.enum(['1:10', '1:100', '1:1000']).nullable().optional(),
@@ -23,6 +32,9 @@ export const createJobSchema = z.object({
         assessmentTypes: z.array(z.string()).optional(),
         aiInterview: z.boolean().default(false),
         aiInterviewTypes: z.array(z.string()).optional(),
+        humanInterview: z.boolean().default(false),
+        humanInterviewTypes: z.array(z.string()).optional(),
+        roundOrder: z.array(z.string()).optional(),
       })
       .optional(),
   }),

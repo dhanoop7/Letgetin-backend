@@ -1,10 +1,10 @@
 import { AppError } from '../../../utils/appError.js';
-import { IFunnelStage } from '../hiringFunnelConfig.model.js';
+import { IFunnelStage, FunnelHealth } from '../hiringFunnelConfig.model.js';
 
 export interface StageCalculationInput {
   stageId: string;
   stageName: string;
-  stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review';
+  stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
   order: number;
   expectedAttendanceRate: number; // 0 < rate <= 1
   expectedPassRate: number;       // 0 < rate <= 1
@@ -17,6 +17,19 @@ export interface FunnelCalculationResult {
   finalShortlistTarget: number;
   totalFunnelIntakeTarget: number;
   stages: IFunnelStage[];
+}
+
+export interface AdaptiveFunnelCalculationResult {
+  finalShortlistTarget: number;
+  actualQualifiedCount: number;
+  idealFunnelIntakeTarget: number;
+  operationalFunnelIntakeTarget: number;
+  stages: IFunnelStage[];
+  idealStages: IFunnelStage[];
+  canProceed: boolean;
+  health: FunnelHealth;
+  estimatedFinalYield: number;
+  deficit: number;
 }
 
 export class HiringFunnelCalculator {
@@ -121,6 +134,110 @@ export class HiringFunnelCalculator {
       finalShortlistTarget,
       totalFunnelIntakeTarget,
       stages: calculatedStages,
+    };
+  }
+
+  /**
+   * Calculates an operational adaptive funnel using the actual qualified candidate pool
+   * while strictly preserving the recruiter's configured finalShortlistTarget and stage criteria.
+   */
+  public static calculateAdaptiveFunnel(
+    actualQualifiedCount: number,
+    finalShortlistTarget: number,
+    stagesInput: StageCalculationInput[],
+    minimumIntake?: number
+  ): AdaptiveFunnelCalculationResult {
+    // 1. Calculate the ideal/planned funnel first
+    const ideal = this.calculateFunnel(finalShortlistTarget, stagesInput);
+    const idealStages = ideal.stages;
+    const idealFunnelIntakeTarget = ideal.totalFunnelIntakeTarget;
+
+    const minRequired =
+      typeof minimumIntake === 'number' && minimumIntake > 0
+        ? minimumIntake
+        : Math.ceil(idealFunnelIntakeTarget * 0.6);
+
+    const safeActualCount = Math.max(0, Math.floor(actualQualifiedCount));
+
+    // 2. Health & proceed determination
+    let health: FunnelHealth;
+    let canProceed = false;
+
+    if (safeActualCount < minRequired || safeActualCount === 0) {
+      health = 'starved';
+      canProceed = false;
+    } else if (safeActualCount < idealFunnelIntakeTarget) {
+      health = 'constrained';
+      canProceed = true;
+    } else {
+      health = 'healthy';
+      canProceed = true;
+    }
+
+    // 3. Operational stage target calculation based on actual pool and pass/attendance rates
+    const operationalStages: IFunnelStage[] = new Array(idealStages.length);
+
+    if (safeActualCount === 0) {
+      for (let i = 0; i < idealStages.length; i++) {
+        operationalStages[i] = { ...idealStages[i], targetCount: 0 };
+      }
+      return {
+        finalShortlistTarget,
+        actualQualifiedCount: safeActualCount,
+        idealFunnelIntakeTarget,
+        operationalFunnelIntakeTarget: 0,
+        stages: operationalStages,
+        idealStages,
+        canProceed: false,
+        health: 'starved',
+        estimatedFinalYield: 0,
+        deficit: finalShortlistTarget,
+      };
+    }
+
+    // Stage 0 intake is bounded by actual available qualified candidates and ideal intake
+    const initialIntake = Math.min(safeActualCount, idealStages[0].targetCount);
+    operationalStages[0] = {
+      ...idealStages[0],
+      targetCount: Math.max(1, initialIntake),
+    };
+
+    // Forward pass calculation for subsequent stages based on configured efficiency
+    for (let i = 1; i < idealStages.length; i++) {
+      const prevStage = operationalStages[i - 1];
+      const prevEfficiency = prevStage.expectedAttendanceRate * prevStage.expectedPassRate;
+      const expectedFromPrev = Math.round(prevStage.targetCount * prevEfficiency);
+
+      // Operational target cannot exceed ideal target nor drop below 1 if previous stage had candidates
+      const stageTarget = Math.min(idealStages[i].targetCount, Math.max(1, expectedFromPrev));
+
+      operationalStages[i] = {
+        ...idealStages[i],
+        targetCount: stageTarget,
+      };
+    }
+
+    // Estimated yield at final stage
+    const lastStage = operationalStages[operationalStages.length - 1];
+    const lastEfficiency = lastStage.expectedAttendanceRate * lastStage.expectedPassRate;
+    const estimatedFinalYield = Math.min(
+      finalShortlistTarget,
+      Math.max(1, Math.round(lastStage.targetCount * lastEfficiency))
+    );
+
+    const deficit = Math.max(0, finalShortlistTarget - safeActualCount);
+
+    return {
+      finalShortlistTarget,
+      actualQualifiedCount: safeActualCount,
+      idealFunnelIntakeTarget,
+      operationalFunnelIntakeTarget: operationalStages[0].targetCount,
+      stages: operationalStages,
+      idealStages,
+      canProceed,
+      health,
+      estimatedFinalYield,
+      deficit,
     };
   }
 }

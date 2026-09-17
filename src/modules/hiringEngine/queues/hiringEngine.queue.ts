@@ -6,7 +6,8 @@ export const HIRING_ENGINE_QUEUE_NAME = 'hiring-engine-queue';
 export type HiringEngineJobType =
   | 'check-candidate-deadline'
   | 'auto-refill-stage'
-  | 'process-stage-evaluation';
+  | 'process-stage-evaluation'
+  | 'check-application-collection-deadline';
 
 export interface CheckCandidateDeadlinePayload {
   type: 'check-candidate-deadline';
@@ -32,10 +33,16 @@ export interface ProcessStageEvaluationPayload {
   evaluationDetails?: Record<string, any>;
 }
 
+export interface CheckApplicationCollectionDeadlinePayload {
+  type: 'check-application-collection-deadline';
+  jobId: string;
+}
+
 export type HiringEnginePayload =
   | CheckCandidateDeadlinePayload
   | AutoRefillStagePayload
-  | ProcessStageEvaluationPayload;
+  | ProcessStageEvaluationPayload
+  | CheckApplicationCollectionDeadlinePayload;
 
 const redisOptions = getRedisConnectionOptions();
 
@@ -171,6 +178,46 @@ export const scheduleProcessStageEvaluation = async (
   } catch (error) {
     console.warn(
       `⚠️ [HiringEngineQueue] Could not schedule stage evaluation for application ${applicationId}:`,
+      (error as Error).message
+    );
+    return null;
+  }
+};
+
+/**
+ * Helper to schedule a collection deadline check when the application collection window closes.
+ */
+export const scheduleApplicationCollectionDeadlineCheck = async (
+  jobId: string,
+  deadlineDate: Date,
+  delayMsOverride?: number
+): Promise<string | null> => {
+  try {
+    const delayMs =
+      typeof delayMsOverride === 'number'
+        ? delayMsOverride
+        : Math.max(0, new Date(deadlineDate).getTime() - Date.now());
+
+    const addPromise = hiringEngineQueue
+      .add(
+        `collection-deadline-${jobId}`,
+        {
+          type: 'check-application-collection-deadline',
+          jobId,
+        },
+        {
+          jobId: `collection-deadline-${jobId}-${Date.now()}`,
+          delay: delayMs,
+        }
+      )
+      .then((j) => j?.id || null)
+      .catch(() => null);
+
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 300));
+    return await Promise.race([addPromise, timeoutPromise]);
+  } catch (error) {
+    console.warn(
+      `⚠️ [HiringEngineQueue] Could not schedule collection deadline check for jobId ${jobId}:`,
       (error as Error).message
     );
     return null;

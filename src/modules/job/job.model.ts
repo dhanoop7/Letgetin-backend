@@ -7,6 +7,28 @@ export type WorkplaceType = 'remote' | 'hybrid' | 'onsite';
 export type JobStatus = 'active' | 'closed' | 'draft';
 export type RecruiterJobStage = 'open' | 'shortlisting' | 'interview' | 'review' | 'completed';
 
+export type ApplicationCollectionStatus =
+  | 'collecting'
+  | 'ready'
+  | 'extended'
+  | 'started'
+  | 'insufficient'
+  | 'closed';
+
+export interface IApplicationCollection {
+  idealIntake: number;
+  minimumIntake: number;
+  actualQualifiedCount: number;
+  initialDeadline?: Date;
+  currentDeadline?: Date;
+  autoExtensionEnabled: boolean;
+  extensionDurationDays: number;
+  maxExtensions: number;
+  extensionsUsed: number;
+  autoStartEnabled: boolean;
+  status: ApplicationCollectionStatus;
+}
+
 export interface IJobDocument extends Document {
   title: string;
   company: {
@@ -51,6 +73,7 @@ export interface IJobDocument extends Document {
   postedBy?: Schema.Types.ObjectId;
   orgId?: Schema.Types.ObjectId;
   salaryText?: string;
+  rounds?: string[];
   pipelineOptions?: {
     matchVolume: string | null;
     resumeMatch: boolean;
@@ -59,12 +82,16 @@ export interface IJobDocument extends Document {
     assessmentTypes: string[];
     aiInterview: boolean;
     aiInterviewTypes: string[];
+    humanInterview?: boolean;
+    humanInterviewTypes?: string[];
+    roundOrder?: string[];
   };
   recruiterStage?: RecruiterJobStage;
   completedAt?: Date;
   creditsCost?: number;
   eligibilityMinPercent?: number;
   finalShortlistTarget?: number;
+  applicationCollection?: IApplicationCollection;
   hiringEngineConfigId?: Types.ObjectId;
   hiringEngineEnabled?: boolean;
   createdAt: Date;
@@ -143,6 +170,7 @@ const JobSchema = new Schema<IJobDocument>(
     postedBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     orgId: { type: Schema.Types.ObjectId, ref: 'RecruiterOrganization', index: true },
     salaryText: { type: String, default: '' },
+    rounds: { type: [String], default: undefined },
     pipelineOptions: {
       matchVolume: { type: String, enum: ['1:10', '1:100', '1:1000'], default: null },
       resumeMatch: { type: Boolean, default: false },
@@ -151,6 +179,9 @@ const JobSchema = new Schema<IJobDocument>(
       assessmentTypes: { type: [String], default: [] },
       aiInterview: { type: Boolean, default: false },
       aiInterviewTypes: { type: [String], default: [] },
+      humanInterview: { type: Boolean, default: false },
+      humanInterviewTypes: { type: [String], default: [] },
+      roundOrder: { type: [String], default: undefined },
     },
     recruiterStage: {
       type: String,
@@ -161,6 +192,24 @@ const JobSchema = new Schema<IJobDocument>(
     creditsCost: { type: Number, default: undefined },
     eligibilityMinPercent: { type: Number, min: 0, max: 100 },
     finalShortlistTarget: { type: Number, min: 1, default: undefined },
+    applicationCollection: {
+      idealIntake: { type: Number, min: 1 },
+      minimumIntake: { type: Number, min: 1 },
+      actualQualifiedCount: { type: Number, default: 0, min: 0 },
+      initialDeadline: { type: Date },
+      currentDeadline: { type: Date },
+      autoExtensionEnabled: { type: Boolean, default: true },
+      extensionDurationDays: { type: Number, default: 3, min: 1 },
+      maxExtensions: { type: Number, default: 2, min: 0 },
+      extensionsUsed: { type: Number, default: 0, min: 0 },
+      autoStartEnabled: { type: Boolean, default: false },
+      status: {
+        type: String,
+        enum: ['collecting', 'ready', 'extended', 'started', 'insufficient', 'closed'],
+        default: 'collecting',
+        index: true,
+      },
+    },
     hiringEngineConfigId: { type: Schema.Types.ObjectId, ref: 'HiringFunnelConfig', default: undefined },
     hiringEngineEnabled: { type: Boolean, default: false, index: true },
   },

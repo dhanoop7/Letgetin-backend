@@ -8,7 +8,7 @@ export const configureHiringPipelineSchema = z.object({
         z.object({
           stageId: z.string().min(1, 'Stage ID is required'),
           stageName: z.string().min(1, 'Stage name is required'),
-          stageType: z.enum(['resume_match', 'assessment', 'ai_interview', 'manual_review']),
+          stageType: z.enum(['resume_match', 'assessment', 'ai_interview', 'manual_review', 'human_interview']),
           order: z.number().int().min(1),
           expectedAttendanceRate: z
             .number()

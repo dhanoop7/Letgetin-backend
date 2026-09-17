@@ -4,6 +4,7 @@ import { JobModel } from '../../job/job.model.js';
 import { CandidateProfileModel } from '../../job/candidateProfile.model.js';
 import { embeddingService } from '../../embedding/embedding.service.js';
 import { CandidateStageHistoryModel } from '../candidateStageHistory.model.js';
+import { HiringFunnelConfigModel } from '../hiringFunnelConfig.model.js';
 import { scheduleCandidateDeadlineCheck } from '../queues/hiringEngine.queue.js';
 import { HiringNotificationHook } from '../notifications/hiringNotification.hook.js';
 
@@ -143,6 +144,15 @@ export class HiringPoolManager {
         });
       }
     }
+
+    await JobModel.findByIdAndUpdate(jobId, {
+      hiringEngineEnabled: true,
+      'applicationCollection.status': 'started',
+    });
+    await HiringFunnelConfigModel.findOneAndUpdate(
+      { jobId, status: { $nin: ['paused', 'completed'] } },
+      { status: 'active' }
+    );
 
     const initialDeficit = Math.max(0, requiredIntake - primaryCandidates.length);
 

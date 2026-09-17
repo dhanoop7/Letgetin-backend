@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { HiringEngineService } from './services/hiringEngine.service.js';
+import { ApplicationCollectionService } from './services/applicationCollection.service.js';
 import { AppError } from '../../utils/appError.js';
 
 export class HiringEngineController {
@@ -254,4 +255,77 @@ export class HiringEngineController {
       next(error);
     }
   }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/application-collection
+   * Retrieves candidate collection status, metrics, thresholds, deadlines, and adaptive funnel calculations.
+   */
+  public static async getApplicationCollection(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      const jobId = req.params.jobId as string;
+      const status = await ApplicationCollectionService.getCollectionStatus(jobId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: status,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/recruiter/jobs/:jobId/application-collection/start
+   * Starts the adaptive hiring pipeline using the actual available qualified candidate pool.
+   */
+  public static async startApplicationCollection(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      const jobId = req.params.jobId as string;
+      const result = await ApplicationCollectionService.startAdaptiveFunnel(jobId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: result.started
+          ? 'Adaptive hiring pipeline started successfully.'
+          : 'Pipeline has already been started.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/recruiter/jobs/:jobId/application-collection/extend
+   * Manually extends the candidate collection window for a job.
+   */
+  public static async extendApplicationCollection(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      const jobId = req.params.jobId as string;
+      const { days } = req.body || {};
+
+      const result = await ApplicationCollectionService.extendCollectionDeadline(jobId, {
+        daysOverride: typeof days === 'number' && days > 0 ? days : undefined,
+        recruiterUserId,
+        isAutomatic: false,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: result.extended
+          ? `Application collection window extended to ${result.newDeadline.toISOString()}.`
+          : result.reason || 'Could not extend collection window.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
+

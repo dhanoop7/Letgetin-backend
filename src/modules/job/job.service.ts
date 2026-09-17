@@ -694,6 +694,11 @@ export class JobService {
       if (isNaN(deadlineDate.getTime())) {
         throw AppError.badRequest('Invalid deadline date.');
       }
+    } else if (data.collectionDurationDays && data.collectionDurationDays > 0) {
+      deadlineDate = new Date(Date.now() + data.collectionDurationDays * 24 * 3600 * 1000);
+    } else if (sanitizedPipeline?.resumeMatch || sanitizedPipeline?.assessment || sanitizedPipeline?.aiInterview) {
+      // Default collection window for Hiring Engine jobs: 7 days
+      deadlineDate = new Date(Date.now() + 7 * 24 * 3600 * 1000);
     }
 
     const job = await JobModel.create({
@@ -703,106 +708,237 @@ export class JobService {
       skills: data.skills || [],
       experienceLevel: 'mid',
       minimumExperience: 0,
+      maximumExperience: 5,
       employmentType: data.employmentType || 'full-time',
       workplaceType: data.workplaceType || 'remote',
-      location: { country: data.location?.trim() || 'Remote', remote: true },
-      salary: { min: 0, max: 0, currency: 'INR', period: 'yearly' },
-      salaryText: data.salaryText?.trim() || 'Competitive',
-      applicationUrl: '',
-      source: 'recruiter',
-      status: isDraft ? 'draft' : 'active',
-      postedBy: userId,
-      orgId: org?._id,
-      pipelineOptions: sanitizedPipeline,
-      recruiterStage: isDraft ? undefined : 'open',
-      creditsCost: creditsCost || undefined,
+      location: { country: 'India', remote: data.workplaceType === 'remote' },
+      salaryText: data.salaryText?.trim() || undefined,
       eligibilityMinPercent: data.eligibilityMinPercent,
       finalShortlistTarget: data.finalShortlistTarget,
+      pipelineOptions: sanitizedPipeline,
+      recruiterStage: 'open',
+      creditsCost,
+      status: isDraft ? 'draft' : 'active',
       expiresAt: deadlineDate,
+      source: 'recruiter_direct',
+      postedBy: new mongoose.Types.ObjectId(userId),
+      orgId: org?._id,
+      publishedAt: new Date(),
     });
 
     if (!isDraft && creditsCost > 0 && org) {
       await recruiterCreditsService.chargeForJobPublish(org._id.toString(), job._id.toString(), creditsCost);
     }
 
-    // Auto-initialize Hiring Engine if recruiter enabled any screening pipeline options
-    const hasPipelineActive = !!(
+    // Auto-enqueue job embedding so candidate-matching recommendations stay fresh
+    enqueueJobEmbedding(job._id.toString()).catch(() => {});
+
+    // Phase 4: Dynamic Candidate Collection & Adaptive Hiring Funnel Setup
+    const hasPipelineActive = !isDraft && Boolean(
       sanitizedPipeline?.resumeMatch ||
       sanitizedPipeline?.assessment ||
-      sanitizedPipeline?.aiInterview
+      sanitizedPipeline?.aiInterview ||
+      sanitizedPipeline?.humanInterview ||
+      (Array.isArray(data.rounds) && data.rounds.length > 0) ||
+      (Array.isArray(data.stages) && data.stages.length > 0)
     );
 
-    if (!isDraft && hasPipelineActive) {
+    if (hasPipelineActive) {
       try {
-        const { HiringEngineService } = await import('../hiringEngine/services/hiringEngine.service.js');
-        const stages: Array<{
+        const { HiringFunnelCalculator } = await import('../hiringEngine/services/hiringFunnelCalculator.js');
+        const { HiringFunnelConfigModel } = await import('../hiringEngine/hiringFunnelConfig.model.js');
+        const { scheduleApplicationCollectionDeadlineCheck } = await import('../hiringEngine/queues/hiringEngine.queue.js');
+        const { ApplicationCollectionService } = await import('../hiringEngine/services/applicationCollection.service.js');
+
+        type FunnelStageItem = {
           stageId: string;
           stageName: string;
-          stageType: 'resume_match' | 'assessment' | 'ai_interview';
+          stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
           order: number;
           expectedAttendanceRate: number;
           expectedPassRate: number;
           deadlineHours: number;
           autoAdvanceScoreThreshold?: number;
-        }> = [];
+          autoRefillEnabled?: boolean;
+        };
+
+        const stages: FunnelStageItem[] = [];
+
+        const buildStageFromKey = (key: string, order: number): FunnelStageItem | null => {
+          const k = String(key).toLowerCase().trim().replace(/[-\s]/g, '_');
+          if (k.includes('assess') || k === 'coding' || k === 'technical_assessment') {
+            return {
+              stageId: 'stage_assessment',
+              stageName: 'Technical Assessment',
+              stageType: 'assessment',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 75,
+              autoRefillEnabled: true,
+            };
+          }
+          if (k.includes('ai_interview') || k === 'aiinterview' || k === 'video_interview') {
+            return {
+              stageId: 'stage_ai_interview',
+              stageName: 'AI Comprehensive Interview',
+              stageType: 'ai_interview',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.5,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 80,
+              autoRefillEnabled: true,
+            };
+          }
+          if (k.includes('human') || k.includes('manual') || k === 'live_interview' || k === 'hiring_manager') {
+            return {
+              stageId: 'stage_human_interview',
+              stageName: 'Human Interview',
+              stageType: 'human_interview',
+              order,
+              expectedAttendanceRate: 0.9,
+              expectedPassRate: 0.5,
+              deadlineHours: 72,
+              autoAdvanceScoreThreshold: 70,
+              autoRefillEnabled: true,
+            };
+          }
+          if (k.includes('resume') || k.includes('screen') || k.includes('ats')) {
+            return {
+              stageId: 'stage_resume_screen',
+              stageName: 'Resume Screening',
+              stageType: 'resume_match',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 24,
+              autoAdvanceScoreThreshold: 70,
+              autoRefillEnabled: true,
+            };
+          }
+          return {
+            stageId: `stage_${k}`,
+            stageName: key,
+            stageType: 'manual_review',
+            order,
+            expectedAttendanceRate: 1.0,
+            expectedPassRate: 0.6,
+            deadlineHours: 48,
+            autoAdvanceScoreThreshold: 70,
+            autoRefillEnabled: true,
+          };
+        };
 
         let currentOrder = 1;
-        if (sanitizedPipeline.assessment) {
-          stages.push({
-            stageId: 'stage_assessment',
-            stageName: 'Technical Assessment',
-            stageType: 'assessment',
-            order: currentOrder++,
-            expectedAttendanceRate: 1.0,
-            expectedPassRate: 0.6,
-            deadlineHours: 48,
-            autoAdvanceScoreThreshold: 75,
-          });
+        if (Array.isArray(data.stages) && data.stages.length > 0) {
+          for (const st of data.stages) {
+            stages.push({
+              ...st,
+              order: currentOrder++,
+            });
+          }
+        } else if (Array.isArray(data.rounds) && data.rounds.length > 0) {
+          for (const round of data.rounds) {
+            const item = buildStageFromKey(round, currentOrder++);
+            if (item) stages.push(item);
+          }
+        } else if (Array.isArray(sanitizedPipeline?.roundOrder) && sanitizedPipeline.roundOrder.length > 0) {
+          for (const round of sanitizedPipeline.roundOrder) {
+            const item = buildStageFromKey(round, currentOrder++);
+            if (item) stages.push(item);
+          }
+        } else {
+          if (sanitizedPipeline?.resumeMatch && !sanitizedPipeline?.assessment && !sanitizedPipeline?.aiInterview && !sanitizedPipeline?.humanInterview) {
+            stages.push(buildStageFromKey('resume_match', currentOrder++)!);
+          }
+          if (sanitizedPipeline?.assessment) {
+            stages.push(buildStageFromKey('assessment', currentOrder++)!);
+          }
+          if (sanitizedPipeline?.aiInterview) {
+            stages.push(buildStageFromKey('ai_interview', currentOrder++)!);
+          }
+          if (sanitizedPipeline?.humanInterview) {
+            stages.push(buildStageFromKey('human_interview', currentOrder++)!);
+          }
         }
-        if (sanitizedPipeline.aiInterview) {
-          stages.push({
-            stageId: 'stage_ai_interview',
-            stageName: 'AI Comprehensive Interview',
-            stageType: 'ai_interview',
-            order: currentOrder++,
-            expectedAttendanceRate: 1.0,
-            expectedPassRate: 0.5,
-            deadlineHours: 48,
-            autoAdvanceScoreThreshold: 80,
-          });
-        }
-        if (stages.length === 0 && sanitizedPipeline.resumeMatch) {
-          stages.push({
-            stageId: 'stage_resume_screen',
-            stageName: 'Resume Screening',
-            stageType: 'resume_match',
-            order: currentOrder++,
-            expectedAttendanceRate: 1.0,
-            expectedPassRate: 0.6,
-            deadlineHours: 24,
-            autoAdvanceScoreThreshold: 70,
-          });
-        }
+
+        job.rounds = stages.map((s) => s.stageId);
 
         const targetCount =
           typeof data.finalShortlistTarget === 'number' && data.finalShortlistTarget > 0
             ? data.finalShortlistTarget
             : 5;
 
-        const pipelineInit = await HiringEngineService.initializePipeline(
-          String(job._id),
-          userId,
-          {
+        // 1. Calculate ideal planned funnel
+        const idealCalculation = HiringFunnelCalculator.calculateFunnel(targetCount, stages);
+        const idealIntake =
+          typeof data.idealIntake === 'number' && data.idealIntake >= targetCount
+            ? data.idealIntake
+            : idealCalculation.totalFunnelIntakeTarget;
+
+        const minimumIntake =
+          typeof data.minimumIntake === 'number' && data.minimumIntake > 0
+            ? data.minimumIntake
+            : Math.max(1, Math.ceil(idealIntake * 0.6));
+
+        // 2. Configure candidate collection state on JobModel
+        job.applicationCollection = {
+          idealIntake,
+          minimumIntake,
+          actualQualifiedCount: 0,
+          initialDeadline: deadlineDate,
+          currentDeadline: deadlineDate,
+          autoExtensionEnabled: data.autoExtensionEnabled !== false,
+          extensionDurationDays: data.extensionDurationDays || 3,
+          maxExtensions: typeof data.maxExtensions === 'number' ? data.maxExtensions : 2,
+          extensionsUsed: 0,
+          autoStartEnabled: !!data.autoStartEnabled,
+          status: 'collecting',
+        };
+
+        // 3. Upsert HiringFunnelConfigModel with planned/ideal stages and draft status
+        let config = await HiringFunnelConfigModel.findOne({ jobId: job._id });
+        if (!config) {
+          config = new HiringFunnelConfigModel({
+            jobId: job._id,
+            orgId: job.orgId,
             finalShortlistTarget: targetCount,
-            stages,
-          }
-        );
+            stages: idealCalculation.stages,
+            idealStages: idealCalculation.stages,
+            idealFunnelIntakeTarget: idealIntake,
+            totalFunnelIntakeTarget: idealIntake,
+            currentShortlistedCount: 0,
+            status: 'draft',
+            funnelHealth: 'healthy',
+            lastCalculatedAt: new Date(),
+          });
+        } else {
+          config.finalShortlistTarget = targetCount;
+          config.stages = idealCalculation.stages;
+          config.idealStages = idealCalculation.stages;
+          config.idealFunnelIntakeTarget = idealIntake;
+          config.totalFunnelIntakeTarget = idealIntake;
+          config.status = 'draft';
+          config.funnelHealth = 'healthy';
+          config.lastCalculatedAt = new Date();
+        }
+        await config.save();
 
         job.hiringEngineEnabled = true;
-        job.hiringEngineConfigId = pipelineInit.config._id as any;
+        job.hiringEngineConfigId = config._id as any;
         await job.save();
+
+        // 4. Schedule BullMQ candidate collection deadline check
+        if (deadlineDate) {
+          await scheduleApplicationCollectionDeadlineCheck(String(job._id), deadlineDate);
+        }
+
+        // 5. Evaluate collection readiness if candidates already applied
+        await ApplicationCollectionService.evaluateCollectionReadiness(job._id);
       } catch (pipelineErr: any) {
-        console.warn('[JobService] Auto-initialization of Hiring Engine failed:', pipelineErr?.message || pipelineErr);
+        console.warn('[JobService] Candidate collection initialization failed:', pipelineErr?.message || pipelineErr);
       }
     }
 
@@ -866,6 +1002,15 @@ export interface RecruiterJobInput {
   deadline?: string;
   saveAsDraft?: boolean;
   finalShortlistTarget?: number;
+  idealIntake?: number;
+  minimumIntake?: number;
+  collectionDurationDays?: number;
+  autoExtensionEnabled?: boolean;
+  extensionDurationDays?: number;
+  maxExtensions?: number;
+  autoStartEnabled?: boolean;
+  rounds?: string[];
+  stages?: any[];
   pipelineOptions?: {
     matchVolume?: string | null;
     resumeMatch?: boolean;
@@ -874,6 +1019,9 @@ export interface RecruiterJobInput {
     assessmentTypes?: string[];
     aiInterview?: boolean;
     aiInterviewTypes?: string[];
+    humanInterview?: boolean;
+    humanInterviewTypes?: string[];
+    roundOrder?: string[];
   };
 }
 

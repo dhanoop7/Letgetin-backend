@@ -13,6 +13,7 @@ export const createJobSchema = z.object({
     eligibilityMinPercent: z.number().min(0).max(100).optional(),
     deadline: z.string().optional(),
     saveAsDraft: z.boolean().optional().default(false),
+    finalShortlistTarget: z.number().int().min(1).max(500).optional(),
     pipelineOptions: z
       .object({
         matchVolume: z.enum(['1:10', '1:100', '1:1000']).nullable().optional(),

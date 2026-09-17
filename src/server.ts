@@ -3,6 +3,7 @@ import { connectDatabase } from './config/database.js';
 import { env } from './config/env.js';
 import { createJobEmbeddingWorker, createCandidateEmbeddingWorker } from './workers/embedding.worker.js';
 import { createAiApplyBatchWorker } from './workers/aiApply.worker.js';
+import { createHiringEngineWorker } from './workers/hiringEngine.worker.js';
 
 const startServer = async () => {
   try {
@@ -13,8 +14,9 @@ const startServer = async () => {
     const jobWorker = createJobEmbeddingWorker();
     const candidateWorker = createCandidateEmbeddingWorker();
     const aiApplyWorker = createAiApplyBatchWorker();
+    const hiringWorker = createHiringEngineWorker();
 
-    console.log('⚡ BullMQ Background Workers initialized (Job Embedding, Candidate Profile Embedding, AI Apply 10x10 Batch Worker)');
+    console.log('⚡ BullMQ Background Workers initialized (Job Embedding, Candidate Profile Embedding, AI Apply 10x10 Batch Worker, Hiring Engine)');
 
     // 3. Initialize Express application
     const app = createApp();
@@ -28,7 +30,12 @@ const startServer = async () => {
     const handleShutdown = async (signal: string) => {
       console.log(`\n⚠️ Received ${signal}. Shutting down gracefully...`);
       try {
-        await Promise.all([jobWorker.close(), candidateWorker.close(), aiApplyWorker.close()]);
+        await Promise.all([
+          jobWorker.close(),
+          candidateWorker.close(),
+          aiApplyWorker.close(),
+          hiringWorker.close(),
+        ]);
       } catch (err) {
         console.warn('Worker shutdown warning:', err);
       }

@@ -25,6 +25,7 @@ import noteRoutes from './modules/note/note.routes.js';
 import networkRoutes from './modules/network/network.routes.js';
 import interviewRoutes from './modules/interview/interview.routes.js';
 import startupRoutes from './modules/startup/startup.routes.js';
+import hiringEngineRoutes from './modules/hiringEngine/hiringEngine.routes.js';
 
 export const createApp = (): Express => {
   const app = express();
@@ -111,6 +112,8 @@ export const createApp = (): Express => {
   app.use('/api/network', networkRoutes);
   app.use('/api/interviews', interviewRoutes);
   app.use('/api/startup', startupRoutes);
+  app.use('/api/recruiter/jobs/:jobId/hiring-engine', hiringEngineRoutes);
+  app.use('/api/jobs/:jobId/hiring-engine', hiringEngineRoutes);
 
   // Centralized error handler
   app.use(errorHandler);

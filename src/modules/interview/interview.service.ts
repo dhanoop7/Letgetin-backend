@@ -203,6 +203,24 @@ export class InterviewService {
     }
 
     await interview.save();
+
+    // Notify Hiring Engine if this interview is linked to a job
+    if (stage === 'completed' && interview.jobId) {
+      import('../hiringEngine/services/hiringEngine.service.js')
+        .then(({ HiringEngineService }) => {
+          HiringEngineService.handleAiInterviewCompleted(String(interview._id), {
+            score: typeof interview.score === 'number' ? interview.score * 20 : undefined,
+            feedbackNotes: interview.feedbackNotes,
+            scorecard: interview.aiScorecard,
+          }).catch((err) => {
+            console.warn('[InterviewService] Hiring Engine hook warning:', err?.message || err);
+          });
+        })
+        .catch((err) => {
+          console.warn('[InterviewService] Failed to load HiringEngineService in updateStage:', err?.message || err);
+        });
+    }
+
     return interview;
   }
 
@@ -221,6 +239,24 @@ export class InterviewService {
     interview.stage = 'completed';
 
     await interview.save();
+
+    // Notify Hiring Engine if this interview is linked to a job
+    if (interview.jobId) {
+      import('../hiringEngine/services/hiringEngine.service.js')
+        .then(({ HiringEngineService }) => {
+          HiringEngineService.handleAiInterviewCompleted(String(interview._id), {
+            score: score * 20,
+            feedbackNotes,
+            scorecard: interview.aiScorecard,
+          }).catch((err) => {
+            console.warn('[InterviewService] Hiring Engine hook warning:', err?.message || err);
+          });
+        })
+        .catch((err) => {
+          console.warn('[InterviewService] Failed to load HiringEngineService in submitFeedback:', err?.message || err);
+        });
+    }
+
     return interview;
   }
 
@@ -332,11 +368,32 @@ Return strictly valid JSON with this exact schema:
       scorecard.evaluationDate = new Date().toISOString();
 
       if (interviewId && userId) {
-        await Interview.findByIdAndUpdate(interviewId, {
-          aiScorecard: scorecard,
-          score: Math.round((scorecard.overallScore / 100) * 5),
-          stage: 'completed',
-        });
+        const updated = await Interview.findByIdAndUpdate(
+          interviewId,
+          {
+            aiScorecard: scorecard,
+            score: Math.round((scorecard.overallScore / 100) * 5),
+            stage: 'completed',
+          },
+          { new: true }
+        );
+
+        if (updated?.jobId) {
+          import('../hiringEngine/services/hiringEngine.service.js')
+            .then(({ HiringEngineService }) => {
+              HiringEngineService.handleAiInterviewCompleted(String(updated._id), {
+                jobId: String(updated.jobId),
+                score: scorecard.overallScore,
+                feedbackNotes: scorecard.summary,
+                scorecard,
+              }).catch((err) => {
+                console.warn('[InterviewService] evaluateSession Hiring Engine hook error:', err?.message || err);
+              });
+            })
+            .catch((err) => {
+              console.warn('[InterviewService] Failed to load HiringEngineService in evaluateSession:', err?.message || err);
+            });
+        }
       }
 
       return scorecard;
@@ -356,11 +413,32 @@ Return strictly valid JSON with this exact schema:
       };
 
       if (interviewId) {
-        await Interview.findByIdAndUpdate(interviewId, {
-          aiScorecard: fallbackScorecard,
-          score: 4,
-          stage: 'completed',
-        });
+        const updated = await Interview.findByIdAndUpdate(
+          interviewId,
+          {
+            aiScorecard: fallbackScorecard,
+            score: 4,
+            stage: 'completed',
+          },
+          { new: true }
+        );
+
+        if (updated?.jobId) {
+          import('../hiringEngine/services/hiringEngine.service.js')
+            .then(({ HiringEngineService }) => {
+              HiringEngineService.handleAiInterviewCompleted(String(updated._id), {
+                jobId: String(updated.jobId),
+                score: fallbackScorecard.overallScore,
+                feedbackNotes: fallbackScorecard.summary,
+                scorecard: fallbackScorecard,
+              }).catch((err) => {
+                console.warn('[InterviewService] evaluateSession fallback hook error:', err?.message || err);
+              });
+            })
+            .catch((err) => {
+              console.warn('[InterviewService] Failed to load HiringEngineService in evaluateSession fallback:', err?.message || err);
+            });
+        }
       }
 
       return fallbackScorecard;

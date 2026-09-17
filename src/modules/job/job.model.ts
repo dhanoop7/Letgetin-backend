@@ -1,4 +1,4 @@
-import { Schema, model, Document } from 'mongoose';
+import { Schema, model, Document, Types } from 'mongoose';
 import { EmbeddingStatus } from '../embedding/embedding.types.js';
 
 export type ExperienceLevel = 'internship' | 'entry' | 'junior' | 'mid' | 'senior' | 'lead';
@@ -64,6 +64,9 @@ export interface IJobDocument extends Document {
   completedAt?: Date;
   creditsCost?: number;
   eligibilityMinPercent?: number;
+  finalShortlistTarget?: number;
+  hiringEngineConfigId?: Types.ObjectId;
+  hiringEngineEnabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -157,6 +160,9 @@ const JobSchema = new Schema<IJobDocument>(
     completedAt: { type: Date, default: undefined },
     creditsCost: { type: Number, default: undefined },
     eligibilityMinPercent: { type: Number, min: 0, max: 100 },
+    finalShortlistTarget: { type: Number, min: 1, default: undefined },
+    hiringEngineConfigId: { type: Schema.Types.ObjectId, ref: 'HiringFunnelConfig', default: undefined },
+    hiringEngineEnabled: { type: Boolean, default: false, index: true },
   },
   {
     timestamps: true,

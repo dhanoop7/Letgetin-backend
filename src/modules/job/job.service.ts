@@ -717,11 +717,93 @@ export class JobService {
       recruiterStage: isDraft ? undefined : 'open',
       creditsCost: creditsCost || undefined,
       eligibilityMinPercent: data.eligibilityMinPercent,
+      finalShortlistTarget: data.finalShortlistTarget,
       expiresAt: deadlineDate,
     });
 
     if (!isDraft && creditsCost > 0 && org) {
       await recruiterCreditsService.chargeForJobPublish(org._id.toString(), job._id.toString(), creditsCost);
+    }
+
+    // Auto-initialize Hiring Engine if recruiter enabled any screening pipeline options
+    const hasPipelineActive = !!(
+      sanitizedPipeline?.resumeMatch ||
+      sanitizedPipeline?.assessment ||
+      sanitizedPipeline?.aiInterview
+    );
+
+    if (!isDraft && hasPipelineActive) {
+      try {
+        const { HiringEngineService } = await import('../hiringEngine/services/hiringEngine.service.js');
+        const stages: Array<{
+          stageId: string;
+          stageName: string;
+          stageType: 'resume_match' | 'assessment' | 'ai_interview';
+          order: number;
+          expectedAttendanceRate: number;
+          expectedPassRate: number;
+          deadlineHours: number;
+          autoAdvanceScoreThreshold?: number;
+        }> = [];
+
+        let currentOrder = 1;
+        if (sanitizedPipeline.assessment) {
+          stages.push({
+            stageId: 'stage_assessment',
+            stageName: 'Technical Assessment',
+            stageType: 'assessment',
+            order: currentOrder++,
+            expectedAttendanceRate: 1.0,
+            expectedPassRate: 0.6,
+            deadlineHours: 48,
+            autoAdvanceScoreThreshold: 75,
+          });
+        }
+        if (sanitizedPipeline.aiInterview) {
+          stages.push({
+            stageId: 'stage_ai_interview',
+            stageName: 'AI Comprehensive Interview',
+            stageType: 'ai_interview',
+            order: currentOrder++,
+            expectedAttendanceRate: 1.0,
+            expectedPassRate: 0.5,
+            deadlineHours: 48,
+            autoAdvanceScoreThreshold: 80,
+          });
+        }
+        if (stages.length === 0 && sanitizedPipeline.resumeMatch) {
+          stages.push({
+            stageId: 'stage_resume_screen',
+            stageName: 'Resume Screening',
+            stageType: 'resume_match',
+            order: currentOrder++,
+            expectedAttendanceRate: 1.0,
+            expectedPassRate: 0.6,
+            deadlineHours: 24,
+            autoAdvanceScoreThreshold: 70,
+          });
+        }
+
+        const targetCount =
+          typeof data.finalShortlistTarget === 'number' && data.finalShortlistTarget > 0
+            ? data.finalShortlistTarget
+            : 5;
+
+        const pipelineInit = await HiringEngineService.initializePipeline(
+          String(job._id),
+          userId,
+          {
+            finalShortlistTarget: targetCount,
+            stages,
+          }
+        );
+
+        job.hiringEngineEnabled = true;
+        job.hiringEngineConfigId = pipelineInit.config._id as any;
+        await job.save();
+      } catch (pipelineErr: any) {
+        console.warn('[JobService] Auto-initialization of Hiring Engine failed:', pipelineErr?.message || pipelineErr);
+      }
     }
 
     return job;
@@ -783,6 +865,7 @@ export interface RecruiterJobInput {
   eligibilityMinPercent?: number;
   deadline?: string;
   saveAsDraft?: boolean;
+  finalShortlistTarget?: number;
   pipelineOptions?: {
     matchVolume?: string | null;
     resumeMatch?: boolean;

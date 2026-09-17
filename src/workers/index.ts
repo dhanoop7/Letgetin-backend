@@ -1,6 +1,7 @@
 import { connectDatabase } from '../config/database.js';
 import { createJobEmbeddingWorker, createCandidateEmbeddingWorker } from './embedding.worker.js';
 import { createAiApplyBatchWorker } from './aiApply.worker.js';
+import { createHiringEngineWorker } from './hiringEngine.worker.js';
 import mongoose from 'mongoose';
 
 const startWorkerProcess = async () => {
@@ -13,17 +14,24 @@ const startWorkerProcess = async () => {
     const jobWorker = createJobEmbeddingWorker();
     const candidateWorker = createCandidateEmbeddingWorker();
     const aiApplyWorker = createAiApplyBatchWorker();
+    const hiringWorker = createHiringEngineWorker();
 
     console.log('⚡ Background Workers active:');
     console.log('   - Job Embedding Worker (Queue: job-embedding-queue)');
     console.log('   - Candidate Embedding Worker (Queue: candidate-embedding-queue)');
     console.log('   - AI Apply Batch Worker (Queue: ai-apply-batch-queue)');
+    console.log('   - Hiring Engine Worker (Queue: hiring-engine-queue)');
 
     // Graceful Shutdown
     const handleShutdown = async (signal: string) => {
       console.log(`\n⚠️ Received ${signal}. Shutting down BullMQ workers gracefully...`);
       try {
-        await Promise.all([jobWorker.close(), candidateWorker.close(), aiApplyWorker.close()]);
+        await Promise.all([
+          jobWorker.close(),
+          candidateWorker.close(),
+          aiApplyWorker.close(),
+          hiringWorker.close(),
+        ]);
         await mongoose.disconnect();
         console.log('🔒 Workers and Database connections closed successfully.');
         process.exit(0);

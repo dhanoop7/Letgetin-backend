@@ -5,6 +5,11 @@ import { ResumeModel } from '../resume/resume.model.js';
 import { JobModel } from '../job/job.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
 import { AppError } from '../../utils/appError.js';
+import { HiringFunnelConfigModel } from '../hiringEngine/hiringFunnelConfig.model.js';
+import { HiringEngineService } from '../hiringEngine/services/hiringEngine.service.js';
+import { HiringPoolManager } from '../hiringEngine/services/hiringPoolManager.js';
+import { scheduleCandidateDeadlineCheck } from '../hiringEngine/queues/hiringEngine.queue.js';
+import { HiringNotificationHook } from '../hiringEngine/notifications/hiringNotification.hook.js';
 
 export interface ApplicationQueryFilters {
   page?: number;
@@ -332,6 +337,53 @@ export class ApplicationService {
       };
     }
 
+    // Check if the job has Hiring Engine enabled
+    const jobDoc = await JobModel.findById(jobObjectId).lean();
+    let initialPoolType: 'primary' | 'reserve' | undefined;
+    let initialStageId: string | undefined;
+    let initialStageIndex: number | undefined;
+    let initialStageStatus: 'invited' | 'pending' | undefined;
+    let initialStageDeadline: Date | undefined;
+    let computedMatchScore = data.matchScore || 78;
+
+    if (jobDoc?.hiringEngineEnabled) {
+      try {
+        const config = await HiringFunnelConfigModel.findOne({ jobId: jobObjectId });
+        if (config && config.stages && config.stages.length > 0 && config.status === 'active') {
+          const stage1 = config.stages[0];
+          initialStageId = stage1.stageId;
+          initialStageIndex = stage1.order;
+
+          // Compute composite score using candidate profile + job skills
+          computedMatchScore = await HiringPoolManager.computeOrGetCompositeScore(
+            { userId: userObjectId, matchScore: data.matchScore } as any,
+            jobDoc.skills || [],
+            jobDoc.embedding
+          );
+
+          // Count active primary candidates in stage 1
+          const activePrimaryCount = await ApplicationModel.countDocuments({
+            jobId: jobObjectId,
+            currentStageId: stage1.stageId,
+            poolType: 'primary',
+            stageStatus: { $in: ['invited', 'started', 'passed'] },
+          });
+
+          if (activePrimaryCount < stage1.targetCount) {
+            initialPoolType = 'primary';
+            initialStageStatus = 'invited';
+            const deadlineHours = stage1.deadlineHours || 48;
+            initialStageDeadline = new Date(Date.now() + deadlineHours * 3600 * 1000);
+          } else {
+            initialPoolType = 'reserve';
+            initialStageStatus = undefined;
+          }
+        }
+      } catch (err) {
+        console.error('[ApplicationService] Error in post-publish pipeline evaluation:', err);
+      }
+    }
+
     const newApp = await ApplicationModel.create({
       userId: userObjectId,
       jobId: jobObjectId,
@@ -341,10 +393,74 @@ export class ApplicationService {
         : undefined,
       source: data.source || 'manual',
       status: data.status || 'submitted',
-      matchScore: data.matchScore || 78,
+      matchScore: computedMatchScore,
+      compositeRank: computedMatchScore,
+      poolType: initialPoolType,
+      currentStageId: initialStageId,
+      currentStageIndex: initialStageIndex,
+      stageStatus: initialStageStatus,
+      stageDeadline: initialStageDeadline,
+      invitedAt: initialPoolType === 'primary' ? new Date() : undefined,
       notes: data.notes || '',
       appliedAt: new Date(),
     });
+
+    if (initialPoolType === 'primary' && initialStageId) {
+      try {
+        await HiringEngineService.recordStageHistory({
+          applicationId: newApp._id,
+          jobId: jobObjectId,
+          candidateId: userObjectId,
+          stageId: initialStageId,
+          stageName: 'Initial Screening',
+          stageIndex: initialStageIndex || 1,
+          status: 'invited',
+          score: computedMatchScore,
+          promotedFromReserve: false,
+          notes: 'Post-publish application admitted to primary pool',
+        });
+
+        const deadlineHours = initialStageDeadline
+          ? Math.max(1, Math.round((initialStageDeadline.getTime() - Date.now()) / (3600 * 1000)))
+          : 48;
+
+        await scheduleCandidateDeadlineCheck(
+          String(jobObjectId),
+          String(newApp._id),
+          initialStageId,
+          deadlineHours
+        );
+
+        HiringNotificationHook.notifyCandidateInvited({
+          candidateId: String(userObjectId),
+          jobId: String(jobObjectId),
+          jobTitle: jobDoc?.title || 'Job Role',
+          stageId: initialStageId,
+          stageName: 'Initial Screening',
+          deadlineHours,
+          stageDeadline: initialStageDeadline,
+        });
+      } catch (err) {
+        console.error('[ApplicationService] Error scheduling primary applicant workflow:', err);
+      }
+    } else if (initialPoolType === 'reserve' && initialStageId) {
+      try {
+        await HiringEngineService.recordStageHistory({
+          applicationId: newApp._id,
+          jobId: jobObjectId,
+          candidateId: userObjectId,
+          stageId: initialStageId,
+          stageName: 'Initial Screening',
+          stageIndex: initialStageIndex || 1,
+          status: 'invited',
+          score: computedMatchScore,
+          promotedFromReserve: false,
+          notes: 'Stage 1 primary pool at target capacity; application admitted to reserve pool',
+        });
+      } catch (err) {
+        console.error('[ApplicationService] Error recording reserve stage history:', err);
+      }
+    }
 
     const populated = await ApplicationModel.findById(newApp._id)
       .populate({
@@ -489,6 +605,22 @@ export class ApplicationService {
     application.status = status;
     if (notes !== undefined) application.notes = notes;
     await application.save();
+
+    // Bidirectional sync: If job has Hiring Engine enabled and applicant is rejected or failed, disqualify & refill
+    if (job?.hiringEngineEnabled && (status === 'rejected' || (status as string) === 'failed')) {
+      try {
+        if (application.poolType === 'primary') {
+          await HiringEngineService.failCandidate(
+            String(job._id),
+            String(application._id),
+            recruiterUserId,
+            notes || 'Applicant rejected by recruiter in ATS'
+          );
+        }
+      } catch (engineErr) {
+        console.warn('[ApplicationService] Hiring engine status sync notice:', engineErr);
+      }
+    }
 
     return application;
   }

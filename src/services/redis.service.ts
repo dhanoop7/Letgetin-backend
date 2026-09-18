@@ -1,5 +1,8 @@
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
+import { createChildLogger } from '../infrastructure/logging/logger.js';
+
+const redisLogger = createChildLogger({ component: 'Redis' });
 
 class RedisService {
   private client: Redis | null = null;
@@ -19,18 +22,18 @@ class RedisService {
 
       this.client.on('connect', () => {
         this.isConnected = true;
-        console.log('✅ Connected to Redis successfully');
+        redisLogger.info('✅ Connected to Redis successfully');
       });
 
       this.client.on('error', (err) => {
         if (this.isConnected) {
-          console.warn('⚠️ Redis connection error:', err.message);
+          redisLogger.warn({ errMessage: err.message }, `⚠️ Redis connection error: ${err.message}`);
         }
         this.isConnected = false;
       });
     } catch (err: unknown) {
       const msg = (err as Error)?.message || String(err);
-      console.warn('⚠️ Failed to initialize Redis client. Falling back to in-memory store:', msg);
+      redisLogger.warn({ errMessage: msg }, `⚠️ Failed to initialize Redis client. Falling back to in-memory store: ${msg}`);
       this.client = null;
       this.isConnected = false;
     }

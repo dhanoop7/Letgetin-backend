@@ -1,7 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
 import { env } from '../../../config/env.js';
 import { AI_CONFIG } from '../../../config/ai.config.js';
+import { createChildLogger } from '../../../infrastructure/logging/logger.js';
 import crypto from 'crypto';
+
+const aiLogger = createChildLogger({ component: 'AI', provider: 'google' });
 
 export interface GenerateOptions {
   prompt: string;
@@ -33,7 +36,7 @@ export class GoogleProvider {
     if (apiKey) {
       this.ai = new GoogleGenAI({ apiKey });
     } else {
-      console.warn('⚠️ GEMINI_API_KEY is missing. GoogleProvider is uninitialized.');
+      aiLogger.warn('⚠️ GEMINI_API_KEY is missing. GoogleProvider operates in degraded mode.');
     }
   }
 
@@ -57,7 +60,16 @@ export class GoogleProvider {
     const maxRetries = options.retryAttempts ?? AI_CONFIG.retryAttempts;
     const modelName = options.model ?? AI_CONFIG.model;
 
+    aiLogger.debug(
+      { aiRequestId: requestId, operation: options.promptName, model: modelName, event: 'started' },
+      `[AI:google] Started execution: ${options.promptName}`
+    );
+
     if (!this.ai) {
+      aiLogger.error(
+        { aiRequestId: requestId, operation: options.promptName, event: 'failed' },
+        'Google AI Provider error: GEMINI_API_KEY is not configured.'
+      );
       throw new Error(`Google AI Provider error: GEMINI_API_KEY is not configured.`);
     }
 
@@ -67,7 +79,10 @@ export class GoogleProvider {
     for (retryCount = 0; retryCount < maxRetries; retryCount++) {
       if (retryCount > 0) {
         const backoffMs = Math.pow(2, retryCount) * 1000;
-        console.warn(`[AI Request ${requestId}] Retrying attempt ${retryCount + 1}/${maxRetries} after ${backoffMs}ms backoff...`);
+        aiLogger.warn(
+          { aiRequestId: requestId, operation: options.promptName, attempt: retryCount + 1, maxRetries, backoffMs },
+          `[AI:google] Retrying attempt ${retryCount + 1}/${maxRetries} after ${backoffMs}ms backoff...`
+        );
         await new Promise((res) => setTimeout(res, backoffMs));
       }
 
@@ -75,15 +90,17 @@ export class GoogleProvider {
         const responseText = await this.executeWithTimeout(options, modelName, timeoutMs);
         const executionTimeMs = Date.now() - startTime;
 
-        // Structured Logging
-        console.log(`\n=========== AI EXECUTION LOG ===========`);
-        console.log(`Request ID     : ${requestId}`);
-        console.log(`Prompt Name    : ${options.promptName}`);
-        console.log(`Model Used     : ${modelName}`);
-        console.log(`Execution Time : ${executionTimeMs} ms`);
-        console.log(`Retry Count    : ${retryCount}`);
-        console.log(`Status         : SUCCESS`);
-        console.log(`========================================\n`);
+        aiLogger.info(
+          {
+            aiRequestId: requestId,
+            operation: options.promptName,
+            model: modelName,
+            durationMs: executionTimeMs,
+            retryCount,
+            event: 'completed',
+          },
+          `[AI:google] Execution completed: ${options.promptName} (${executionTimeMs}ms)`
+        );
 
         return {
           text: responseText,
@@ -95,7 +112,15 @@ export class GoogleProvider {
         };
       } catch (err: any) {
         lastError = err;
-        console.error(`[AI Request ${requestId}] Attempt ${retryCount + 1} failed: ${err?.message || err}`);
+        aiLogger.warn(
+          {
+            aiRequestId: requestId,
+            operation: options.promptName,
+            attempt: retryCount + 1,
+            errMessage: err?.message || String(err),
+          },
+          `[AI:google] Attempt ${retryCount + 1} failed: ${err?.message || err}`
+        );
         // Fail fast on errors a retry can never fix: rate/quota limits (429) and malformed/rejected
         // requests (400/401/403) - retrying an identically invalid request just wastes latency before
         // the caller's fallback kicks in.
@@ -118,14 +143,19 @@ export class GoogleProvider {
     }
 
     const totalTimeMs = Date.now() - startTime;
-    console.error(`\n=========== AI EXECUTION FAILED ===========`);
-    console.error(`Request ID     : ${requestId}`);
-    console.error(`Prompt Name    : ${options.promptName}`);
-    console.error(`Model Used     : ${modelName}`);
-    console.error(`Execution Time : ${totalTimeMs} ms`);
-    console.error(`Total Retries  : ${retryCount}`);
-    console.error(`Final Error    : ${lastError?.message}`);
-    console.error(`===========================================\n`);
+    aiLogger.error(
+      {
+        aiRequestId: requestId,
+        operation: options.promptName,
+        model: modelName,
+        durationMs: totalTimeMs,
+        totalRetries: retryCount,
+        errName: lastError?.name,
+        errMessage: lastError?.message,
+        event: 'failed',
+      },
+      `[AI:google] Execution failed: ${options.promptName} after ${totalTimeMs}ms (${lastError?.message})`
+    );
 
     throw new Error(`AI Provider failed [${options.promptName}] after ${maxRetries} attempts: ${lastError?.message}`);
   }

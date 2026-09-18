@@ -1,4 +1,7 @@
 import { EventEmitter } from 'events';
+import { createChildLogger } from '../../../infrastructure/logging/logger.js';
+
+const hiringLogger = createChildLogger({ component: 'HiringEngine' });
 
 export interface CandidateInvitedNotification {
   candidateId: string;
@@ -85,48 +88,133 @@ class HiringNotificationHookEmitter extends EventEmitter {
     super();
     // Default logging listener for traceability
     this.on('candidateInvited', (data: CandidateInvitedNotification) => {
+      hiringLogger.info(
+        {
+          event: 'candidate_invited',
+          candidateId: data.candidateId,
+          jobId: data.jobId,
+          stageId: data.stageId,
+          stageName: data.stageName,
+          deadline: data.stageDeadline,
+        },
+        `Candidate "${data.fullName || data.candidateId}" invited to stage "${data.stageName}" for role "${data.jobTitle}"`
+      );
       console.log(
         `📨 [HiringNotificationHook] Candidate "${data.fullName || data.candidateId}" invited to stage "${data.stageName}" for role "${data.jobTitle}" (Deadline: ${data.stageDeadline?.toISOString() || `${data.deadlineHours}h`})`
       );
     });
 
     this.on('candidatePassed', (data: CandidatePassedNotification) => {
+      hiringLogger.info(
+        {
+          event: 'candidate_passed',
+          candidateId: data.candidateId,
+          jobId: data.jobId,
+          stageId: data.stageId,
+          stageName: data.stageName,
+          nextStageId: data.nextStageId,
+          score: data.score,
+        },
+        `Candidate "${data.candidateId}" passed stage "${data.stageName}" for role "${data.jobTitle}"`
+      );
       console.log(
         `🎉 [HiringNotificationHook] Candidate "${data.candidateId}" passed stage "${data.stageName}" for role "${data.jobTitle}"`
       );
     });
 
     this.on('candidateFailed', (data: CandidateFailedNotification) => {
+      hiringLogger.warn(
+        {
+          event: 'candidate_failed',
+          candidateId: data.candidateId,
+          jobId: data.jobId,
+          stageId: data.stageId,
+          stageName: data.stageName,
+          reason: data.reason,
+        },
+        `Candidate "${data.candidateId}" failed stage "${data.stageName}" for role "${data.jobTitle}"`
+      );
       console.log(
         `❌ [HiringNotificationHook] Candidate "${data.candidateId}" failed stage "${data.stageName}" for role "${data.jobTitle}": ${data.reason || 'Criteria not met'}`
       );
     });
 
     this.on('candidateNoShow', (data: CandidateNoShowNotification) => {
+      hiringLogger.warn(
+        {
+          event: 'candidate_no_show',
+          candidateId: data.candidateId,
+          jobId: data.jobId,
+          stageId: data.stageId,
+          stageName: data.stageName,
+        },
+        `Candidate "${data.candidateId}" marked NO-SHOW in stage "${data.stageName}" for role "${data.jobTitle}"`
+      );
       console.log(
         `⚠️ [HiringNotificationHook] Candidate "${data.candidateId}" marked NO-SHOW in stage "${data.stageName}" for role "${data.jobTitle}"`
       );
     });
 
     this.on('candidateShortlisted', (data: CandidateShortlistedNotification) => {
+      hiringLogger.info(
+        {
+          event: 'candidate_shortlisted',
+          candidateId: data.candidateId,
+          jobId: data.jobId,
+          totalShortlisted: data.totalShortlisted,
+          targetCount: data.targetCount,
+        },
+        `Candidate "${data.candidateId}" reached FINAL SHORTLIST for role "${data.jobTitle}" (${data.totalShortlisted}/${data.targetCount})`
+      );
       console.log(
         `🏆 [HiringNotificationHook] Candidate "${data.candidateId}" reached FINAL SHORTLIST for role "${data.jobTitle}" (${data.totalShortlisted}/${data.targetCount})`
       );
     });
 
     this.on('collectionExtended', (data: CollectionExtendedNotification) => {
+      hiringLogger.info(
+        {
+          event: 'collection_extended',
+          jobId: data.jobId,
+          qualified: data.qualifiedCandidates,
+          minimumRequired: data.minimumRequired,
+          extensionsUsed: data.extensionsUsed,
+          maxExtensions: data.maxExtensions,
+        },
+        `Candidate collection extended for role "${data.jobTitle}"`
+      );
       console.log(
         `⏳ [HiringNotificationHook] Candidate collection extended for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired}, NewDeadline=${data.newDeadline.toISOString()}, Extensions=${data.extensionsUsed}/${data.maxExtensions}`
       );
     });
 
     this.on('collectionInsufficient', (data: CollectionInsufficientNotification) => {
+      hiringLogger.warn(
+        {
+          event: 'collection_insufficient',
+          jobId: data.jobId,
+          qualified: data.qualifiedCandidates,
+          minimumRequired: data.minimumRequired,
+          finalShortlistTarget: data.finalShortlistTarget,
+        },
+        `Insufficient qualified candidates for role "${data.jobTitle}"`
+      );
       console.log(
         `⚠️ [HiringNotificationHook] Insufficient qualified candidates for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired} (Final Target: ${data.finalShortlistTarget})`
       );
     });
 
     this.on('collectionReady', (data: CollectionReadyNotification) => {
+      hiringLogger.info(
+        {
+          event: 'collection_ready',
+          jobId: data.jobId,
+          qualified: data.qualifiedCandidates,
+          minimumRequired: data.minimumRequired,
+          idealIntake: data.idealIntake,
+        },
+        `Candidate collection ready for role "${data.jobTitle}"`
+      );
       console.log(
         `🚀 [HiringNotificationHook] Candidate collection ready for role "${data.jobTitle}": Qualified=${data.qualifiedCandidates}/${data.minimumRequired} (Ideal: ${data.idealIntake})`
       );

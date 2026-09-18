@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
 import { errorHandler } from './middleware/error.middleware.js';
+import { httpLogger } from './infrastructure/logging/httpLogger.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import resumeRoutes from './modules/resume/resume.routes.js';
 import aiRoutes from './modules/ai/ai.routes.js';
@@ -68,12 +69,16 @@ export const createApp = (): Express => {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Request-Id', 'X-Correlation-Id'],
+    exposedHeaders: ['X-Request-Id'],
     optionsSuccessStatus: 200,
   };
 
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
+
+  // Centralized HTTP Request & Correlation Logging (mounts early)
+  app.use(httpLogger);
 
   // Body Parsing
   app.use(express.json({ limit: '10mb' }));

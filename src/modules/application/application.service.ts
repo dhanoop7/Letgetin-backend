@@ -11,6 +11,9 @@ import { HiringPoolManager } from '../hiringEngine/services/hiringPoolManager.js
 import { scheduleCandidateDeadlineCheck } from '../hiringEngine/queues/hiringEngine.queue.js';
 import { HiringNotificationHook } from '../hiringEngine/notifications/hiringNotification.hook.js';
 import { ApplicationCollectionService } from '../hiringEngine/services/applicationCollection.service.js';
+import { createChildLogger } from '../../infrastructure/logging/logger.js';
+
+const appLogger = createChildLogger({ component: 'ApplicationService' });
 
 export interface ApplicationQueryFilters {
   page?: number;
@@ -256,6 +259,11 @@ export class ApplicationService {
     const userObjectId = new mongoose.Types.ObjectId(userId);
     const jobObjectId = new mongoose.Types.ObjectId(data.jobId);
 
+    appLogger.info(
+      { userId, jobId: data.jobId, source: data.source || 'manual', event: 'application_attempt' },
+      `[ApplicationService] Application attempt: User ${userId} -> Job ${data.jobId}`
+    );
+
     // Resolve resumeId: check specified resume, then active resume, then latest updated resume
     let resumeObjectId: mongoose.Types.ObjectId | undefined;
     if (data.resumeId && mongoose.Types.ObjectId.isValid(data.resumeId)) {
@@ -294,6 +302,16 @@ export class ApplicationService {
       if (job?.eligibilityMinPercent != null) {
         const profile = await UserProfileModel.findOne({ userId: userObjectId }).select('academicPercentage').lean();
         if (profile?.academicPercentage != null && profile.academicPercentage < job.eligibilityMinPercent) {
+          appLogger.warn(
+            {
+              userId,
+              jobId: data.jobId,
+              candidateScore: profile.academicPercentage,
+              requiredScore: job.eligibilityMinPercent,
+              event: 'eligibility_rejected',
+            },
+            `[ApplicationService] Candidate ${userId} rejected by eligibility: ${profile.academicPercentage}% < ${job.eligibilityMinPercent}%`
+          );
           throw AppError.badRequest(
             `You do not meet the minimum eligibility requirement (${job.eligibilityMinPercent}%) for this job.`
           );
@@ -431,6 +449,19 @@ export class ApplicationService {
       notes: data.notes || '',
       appliedAt: new Date(),
     });
+
+    appLogger.info(
+      {
+        applicationId: newApp._id,
+        userId,
+        jobId: data.jobId,
+        matchScore: computedMatchScore,
+        poolType: initialPoolType,
+        stageId: initialStageId,
+        event: 'application_created',
+      },
+      `[ApplicationService] Application created: App ${newApp._id} for User ${userId} on Job ${data.jobId} (Score: ${computedMatchScore}, Pool: ${initialPoolType || 'collection'})`
+    );
 
     // If job is in collection phase, trigger readiness evaluation (auto-starts if autoStartEnabled & min reached)
     if (isCollectionPhase) {

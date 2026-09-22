@@ -47,3 +47,11 @@ export const refillStageSchema = z.object({
     count: z.number().int().min(1).optional(),
   }),
 });
+
+export const finalDecisionSchema = z.object({
+  body: z.object({
+    decision: z.enum(['offered', 'on_hold', 'rejected']),
+    notes: z.string().optional(),
+  }),
+});
+

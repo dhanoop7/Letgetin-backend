@@ -73,10 +73,19 @@ export class HiringPoolManager {
       throw new Error(`Job not found for ID: ${jobId}`);
     }
 
-    // Retrieve all active applications for this job that are not rejected or failed
+    // Retrieve all active qualified applications for this job that have passed resume shortlisting
     const applications = await ApplicationModel.find({
       jobId,
       status: { $nin: ['rejected', 'failed'] },
+      poolType: { $ne: 'disqualified' },
+      resumeDecision: { $nin: ['rejected', 'needs_review'] },
+      $or: [
+        { resumeDecision: 'shortlisted' },
+        { resumeDecision: 'pending', poolType: { $in: ['primary', 'reserve'] } },
+        { resumeDecision: 'pending', matchScore: { $gte: 35 } },
+        { resumeDecision: 'pending', compositeRank: { $gte: 35 } },
+        { resumeDecision: { $exists: false } },
+      ],
     });
 
     if (applications.length === 0) {

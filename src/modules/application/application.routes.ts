@@ -8,6 +8,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', asyncHandler(ApplicationController.getApplications));
+router.get('/:id/tracking', asyncHandler(ApplicationController.getApplicationTracking));
 router.post('/', asyncHandler(ApplicationController.createApplication));
 router.patch('/:id/status', asyncHandler(ApplicationController.updateStatus));
 router.delete('/:id', asyncHandler(ApplicationController.deleteApplication));

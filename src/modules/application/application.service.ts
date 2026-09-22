@@ -6,6 +6,7 @@ import { JobModel } from '../job/job.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
 import { AppError } from '../../utils/appError.js';
 import { HiringFunnelConfigModel } from '../hiringEngine/hiringFunnelConfig.model.js';
+import { CandidateStageHistoryModel } from '../hiringEngine/candidateStageHistory.model.js';
 import { HiringEngineService } from '../hiringEngine/services/hiringEngine.service.js';
 import { HiringPoolManager } from '../hiringEngine/services/hiringPoolManager.js';
 import { scheduleCandidateDeadlineCheck } from '../hiringEngine/queues/hiringEngine.queue.js';
@@ -104,6 +105,20 @@ export class ApplicationService {
         notes: app.notes || '',
         appliedAt: app.appliedAt,
         createdAt: app.createdAt,
+        // Authoritative Hiring Engine fields for candidate tracking
+        resumeScreeningStatus: app.resumeScreeningStatus || 'pending',
+        resumeDecision: app.resumeDecision || 'pending',
+        poolType: app.poolType,
+        currentStageIndex: app.currentStageIndex,
+        currentStageId: app.currentStageId,
+        stageStatus: app.stageStatus,
+        stageDeadline: app.stageDeadline,
+        invitedAt: app.invitedAt,
+        stageStartedAt: app.stageStartedAt,
+        stageCompletedAt: app.stageCompletedAt,
+        finalShortlistDecision: app.finalShortlistDecision,
+        offeredAt: app.offeredAt,
+        hiredAt: app.hiredAt,
       })),
       stats,
       recentBatches,
@@ -463,6 +478,14 @@ export class ApplicationService {
       `[ApplicationService] Application created: App ${newApp._id} for User ${userId} on Job ${data.jobId} (Score: ${computedMatchScore}, Pool: ${initialPoolType || 'collection'})`
     );
 
+    // Trigger AI Resume Evaluation scorecard
+    try {
+      const { resumeScreeningService } = await import('../resumeScreening/resumeScreening.service.js');
+      await resumeScreeningService.evaluateApplicationResume(newApp._id);
+    } catch (evalErr) {
+      console.warn('[ApplicationService] AI Resume Evaluation error on apply:', evalErr);
+    }
+
     // If job is in collection phase, trigger readiness evaluation (auto-starts if autoStartEnabled & min reached)
     if (isCollectionPhase) {
       try {
@@ -695,6 +718,93 @@ export class ApplicationService {
     }
 
     return application;
+  }
+
+  /**
+   * Retrieves candidate tracking details for a specific application:
+   * application status, job's configured dynamic stages, and chronological stage milestones.
+   */
+  async getApplicationTracking(userId: string, applicationId: string) {
+    if (!mongoose.Types.ObjectId.isValid(applicationId)) {
+      throw AppError.badRequest('Invalid application ID format');
+    }
+
+    const application = await ApplicationModel.findById(applicationId)
+      .populate({
+        path: 'jobId',
+        select:
+          'title company location salary experienceLevel minimumExperience maximumExperience employmentType workplaceType skills responsibilities requirements preferredQualifications educationRequirements benefits applicationUrl status publishedAt',
+      })
+      .populate({
+        path: 'resumeId',
+        select: 'title atsScore createdAt',
+      })
+      .lean();
+
+    if (!application) {
+      throw AppError.notFound('Application not found');
+    }
+
+    if (String(application.userId) !== String(userId)) {
+      throw AppError.forbidden('You do not have permission to view this application');
+    }
+
+    // Load job's dynamic funnel configuration
+    const funnelConfig = await HiringFunnelConfigModel.findOne({
+      jobId: (application.jobId as any)?._id || application.jobId,
+    }).lean();
+
+    // Map dynamic stages (only candidate-relevant info, excluding recruiter internal formulas)
+    const funnelStages = (funnelConfig?.stages || []).map((s: any) => ({
+      stageId: s.stageId,
+      stageName: s.stageName,
+      stageType: s.stageType,
+      order: s.order,
+      deadlineHours: s.deadlineHours,
+    }));
+
+    // Load candidate stage history (sanitized, chronological)
+    const historyDocs = await CandidateStageHistoryModel.find({
+      applicationId: application._id,
+      candidateId: new mongoose.Types.ObjectId(userId),
+    })
+      .sort({ enteredAt: 1 })
+      .lean();
+
+    const stageHistory = historyDocs.map((h: any) => ({
+      stageId: h.stageId,
+      stageName: h.stageName,
+      stageIndex: h.stageIndex,
+      status: h.status,
+      enteredAt: h.enteredAt,
+      completedAt: h.completedAt,
+      promotedFromReserve: h.promotedFromReserve,
+    }));
+
+    return {
+      application: {
+        _id: String(application._id),
+        job: application.jobId,
+        resume: application.resumeId,
+        status: application.status,
+        appliedAt: application.appliedAt,
+        resumeScreeningStatus: application.resumeScreeningStatus || 'pending',
+        resumeDecision: application.resumeDecision || 'pending',
+        poolType: application.poolType,
+        currentStageIndex: application.currentStageIndex,
+        currentStageId: application.currentStageId,
+        stageStatus: application.stageStatus,
+        stageDeadline: application.stageDeadline,
+        invitedAt: application.invitedAt,
+        stageStartedAt: application.stageStartedAt,
+        stageCompletedAt: application.stageCompletedAt,
+        finalShortlistDecision: application.finalShortlistDecision,
+        offeredAt: application.offeredAt,
+        hiredAt: application.hiredAt,
+      },
+      funnelStages,
+      stageHistory,
+    };
   }
 }
 

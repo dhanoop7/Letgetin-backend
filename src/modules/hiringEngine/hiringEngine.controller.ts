@@ -327,5 +327,67 @@ export class HiringEngineController {
       next(error);
     }
   }
+
+  /**
+   * GET /jobs/:jobId/final-shortlist
+   * Returns ONLY candidates who have actually completed the final configured funnel stage and reached final shortlist.
+   */
+  public static async getFinalShortlist(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const result = await HiringEngineService.getFinalShortlistCandidates(jobId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /jobs/:jobId/final-shortlist/:applicationId/decision
+   * Records a recruiter final decision: 'offered' | 'on_hold' | 'rejected'
+   */
+  public static async recordFinalDecision(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const applicationId = Array.isArray(req.params.applicationId)
+        ? req.params.applicationId[0]
+        : req.params.applicationId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const { decision, notes } = req.body;
+
+      const result = await HiringEngineService.recordFinalDecision(
+        jobId,
+        applicationId,
+        recruiterUserId,
+        decision,
+        notes
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: `Candidate final decision recorded as '${decision}'.`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 

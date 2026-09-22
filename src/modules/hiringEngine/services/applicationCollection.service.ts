@@ -225,10 +225,11 @@ export class ApplicationCollectionService {
   /**
    * Counts the actual number of qualified candidates who have applied for this job.
    * Rules:
+   * - Requires candidate to have passed Resume Shortlisting (resumeDecision === 'shortlisted')
+   *   or legacy/test fallback where candidate has already been admitted to primary/reserve or meets baseline score.
+   * - Excludes candidates whose resume screening was rejected or marked needs_review.
    * - Deduplicates candidates by userId (counted only once)
-   * - Excludes failed or rejected applications
-   * - Excludes candidates who fall below eligibilityMinPercent (if specified)
-   * - Requires a valid baseline match score (>= 35)
+   * - Excludes failed or rejected applications and disqualified pool candidates.
    */
   public static async getQualifiedCandidateCount(jobId: string | Types.ObjectId): Promise<number> {
     const job = await JobModel.findById(jobId).select('eligibilityMinPercent skills embedding').lean();
@@ -238,8 +239,16 @@ export class ApplicationCollectionService {
       jobId,
       status: { $nin: ['rejected', 'failed'] },
       poolType: { $ne: 'disqualified' },
+      resumeDecision: { $nin: ['rejected', 'needs_review'] },
+      $or: [
+        { resumeDecision: 'shortlisted' },
+        { resumeDecision: 'pending', poolType: { $in: ['primary', 'reserve'] } },
+        { resumeDecision: 'pending', matchScore: { $gte: 35 } },
+        { resumeDecision: 'pending', compositeRank: { $gte: 35 } },
+        { resumeDecision: { $exists: false } },
+      ],
     })
-      .select('userId matchScore compositeRank status')
+      .select('userId matchScore compositeRank status resumeDecision')
       .lean();
 
     if (applications.length === 0) return 0;
@@ -255,10 +264,15 @@ export class ApplicationCollectionService {
       }
       seenUserIds.add(uId);
 
-      // Verify baseline qualification score (matchScore or compositeRank >= 35)
-      const score = app.compositeRank ?? app.matchScore ?? 50;
-      if (score >= 35) {
+      // Definitively qualified if resumeDecision is 'shortlisted'
+      if (app.resumeDecision === 'shortlisted') {
         qualifiedCount++;
+      } else {
+        // Fallback for legacy records or scripts without explicit resumeDecision
+        const score = app.compositeRank ?? app.matchScore ?? 50;
+        if (score >= 35) {
+          qualifiedCount++;
+        }
       }
     }
 

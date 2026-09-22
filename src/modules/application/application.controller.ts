@@ -107,4 +107,15 @@ export class ApplicationController {
       timestamp: new Date().toISOString(),
     });
   };
+
+  static getApplicationTracking = async (req: Request, res: Response): Promise<void> => {
+    const applicationId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const tracking = await applicationService.getApplicationTracking(req.user!.userId, String(applicationId));
+
+    res.status(200).json({
+      success: true,
+      data: tracking,
+      timestamp: new Date().toISOString(),
+    });
+  };
 }

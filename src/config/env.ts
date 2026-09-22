@@ -6,7 +6,7 @@ dotenv.config();
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().transform((val: string) => parseInt(val, 10)).default('5001'),
-  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required').default('mongodb://localhost:27017/resumebuildai'),
+  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required').default('mongodb://localhost:27017/letgetin'),
   JWT_ACCESS_SECRET: z.string().min(10, 'JWT_ACCESS_SECRET must be at least 10 chars').default('super-secret-access-token-key-change-in-prod'),
   JWT_REFRESH_SECRET: z.string().min(10, 'JWT_REFRESH_SECRET must be at least 10 chars').default('super-secret-refresh-token-key-change-in-prod'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),

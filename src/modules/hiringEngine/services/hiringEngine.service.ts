@@ -46,6 +46,7 @@ export interface FunnelMetricsReport {
   currentShortlistedCount: number;
   totalFunnelIntakeTarget: number;
   totalApplicants: number;
+  actualQualifiedCount?: number;
   primaryPoolSize: number;
   reservePoolSize: number;
   health: FunnelHealthState;
@@ -333,6 +334,9 @@ export class HiringEngineService {
       healthReason = `Stage deficit detected (${totalDeficitAcrossStages} slots open) but reserve candidate pool is exhausted.`;
     }
 
+    const { ApplicationCollectionService } = await import('./applicationCollection.service.js');
+    const actualQualifiedCount = await ApplicationCollectionService.getQualifiedCandidateCount(job._id);
+
     return {
       jobId: String(job._id),
       jobTitle: job.title,
@@ -340,6 +344,7 @@ export class HiringEngineService {
       currentShortlistedCount: config.currentShortlistedCount,
       totalFunnelIntakeTarget: config.totalFunnelIntakeTarget,
       totalApplicants: allApplications.length,
+      actualQualifiedCount,
       primaryPoolSize,
       reservePoolSize,
       health,
@@ -462,6 +467,7 @@ export class HiringEngineService {
       // Candidate reached final shortlist!
       application.stageStatus = 'passed';
       application.status = 'shortlisted'; // Sync with existing ATS status
+      application.finalShortlistDecision = application.finalShortlistDecision || 'pending';
       application.stageCompletedAt = now;
       await application.save();
 
@@ -1119,6 +1125,219 @@ export class HiringEngineService {
       countToPromote,
       stage.deadlineHours
     );
+  }
+
+  /**
+   * Retrieves ONLY candidates who have actually completed the final configured funnel stage
+   * and reached final shortlist.
+   */
+  public static async getFinalShortlistCandidates(jobId: string, recruiterUserId: string) {
+    const job = await this.verifyJobOwnership(jobId, recruiterUserId);
+    const config = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+
+    if (!config || !Array.isArray(config.stages) || config.stages.length === 0) {
+      return {
+        jobId: String(job._id),
+        jobTitle: job.title,
+        finalShortlistTarget: job.finalShortlistTarget || 5,
+        currentShortlistedCount: 0,
+        stats: {
+          totalFinalists: 0,
+          pendingReview: 0,
+          offersSent: 0,
+          onHold: 0,
+          rejected: 0,
+          hired: 0,
+        },
+        candidates: [],
+      };
+    }
+
+    const totalStages = config.stages.length;
+
+    // A candidate has reached final shortlist IF AND ONLY IF:
+    // 1. They belong to this job
+    // 2. They have completed all stages: currentStageIndex >= totalStages
+    // 3. Their status is shortlisted/offered/hired OR stageStatus is passed with finalShortlistDecision
+    // This strictly excludes candidates who are still in intermediate stages (e.g. stage 1 or 2)
+    // and candidates who were only resume-screened.
+    const finalists = await ApplicationModel.find({
+      jobId,
+      currentStageIndex: { $gte: totalStages },
+      $or: [
+        { status: { $in: ['shortlisted', 'offered', 'hired'] } },
+        { finalShortlistDecision: { $in: ['pending', 'offered', 'on_hold', 'rejected'] } },
+        { stageStatus: 'passed' },
+      ],
+    })
+      .populate({ path: 'userId', model: UserModel, select: 'fullName username email phone avatarUrl' })
+      .populate({ path: 'resumeId', model: ResumeModel, select: 'title atsScore content' })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    // Attach stage history and structured evaluation for each finalist
+    const candidateItems = await Promise.all(
+      finalists.map(async (app: any) => {
+        const historyDocs = await CandidateStageHistoryModel.find({
+          applicationId: app._id,
+        })
+          .sort({ stageIndex: 1 })
+          .lean();
+
+        const completedStages = historyDocs
+          .filter((h) => h.status === 'passed' || h.status === 'completed')
+          .map((h) => ({
+            stageId: h.stageId,
+            stageName: h.stageName,
+            stageIndex: h.stageIndex,
+            status: h.status,
+            score: h.score,
+            completedAt: h.completedAt,
+            notes: h.notes,
+          }));
+
+        const user = app.userId || {};
+        const resume = app.resumeId || null;
+
+        return {
+          applicationId: String(app._id),
+          jobId: String(app.jobId),
+          candidate: {
+            _id: String(user._id || app.userId),
+            fullName: user.fullName || user.username || 'Candidate',
+            username: user.username,
+            email: user.email,
+            phone: user.phone,
+            avatarUrl: user.avatarUrl,
+          },
+          resume: resume
+            ? {
+                _id: String(resume._id),
+                title: resume.title,
+                atsScore: resume.atsScore,
+                content: resume.content,
+              }
+            : null,
+          resumeScore: app.matchScore || app.resumeEvaluation?.overallScore || 0,
+          compositeRank: app.compositeRank || app.matchScore || 0,
+          completedStages,
+          stageScores: {
+            matchScore: app.matchScore,
+            assessmentScore: app.assessmentScore,
+            aiScore: app.aiScore,
+          },
+          finalShortlistDate: app.stageCompletedAt || app.updatedAt,
+          finalShortlistDecision: app.finalShortlistDecision || 'pending',
+          offeredAt: app.offeredAt,
+          hiredAt: app.hiredAt,
+          relevantStageHistory: historyDocs,
+          resumeEvaluation: app.resumeEvaluation,
+          notes: app.notes || '',
+        };
+      })
+    );
+
+    return {
+      jobId: String(job._id),
+      jobTitle: job.title,
+      finalShortlistTarget: config.finalShortlistTarget,
+      currentShortlistedCount: config.currentShortlistedCount,
+      stats: {
+        totalFinalists: candidateItems.length,
+        pendingReview: candidateItems.filter((c) => c.finalShortlistDecision === 'pending').length,
+        offersSent: candidateItems.filter((c) => c.finalShortlistDecision === 'offered').length,
+        onHold: candidateItems.filter((c) => c.finalShortlistDecision === 'on_hold').length,
+        rejected: candidateItems.filter((c) => c.finalShortlistDecision === 'rejected').length,
+        hired: candidateItems.filter((c) => c.finalShortlistDecision === 'hired').length,
+      },
+      candidates: candidateItems,
+    };
+  }
+
+  /**
+   * Recruiter records a final shortlist decision on a finalist:
+   * 'offered' | 'on_hold' | 'rejected'
+   * Note: 'hired' is triggered only upon candidate acceptance.
+   */
+  public static async recordFinalDecision(
+    jobId: string,
+    applicationId: string,
+    recruiterUserId: string,
+    decision: 'offered' | 'on_hold' | 'rejected',
+    notes?: string
+  ) {
+    await this.verifyJobOwnership(jobId, recruiterUserId);
+
+    if (!['offered', 'on_hold', 'rejected'].includes(decision)) {
+      throw AppError.badRequest("Invalid decision. Supported decisions are 'offered', 'on_hold', 'rejected'.");
+    }
+
+    const config = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+    if (!config) {
+      throw AppError.notFound('Hiring funnel configuration not found.');
+    }
+
+    const application = await ApplicationModel.findOne({ _id: applicationId, jobId });
+    if (!application) {
+      throw AppError.notFound('Application not found.');
+    }
+
+    const totalStages = config.stages.length;
+    const isFinalist =
+      application.currentStageIndex !== undefined &&
+      application.currentStageIndex >= totalStages &&
+      (application.stageStatus === 'passed' ||
+        ['shortlisted', 'offered', 'hired'].includes(application.status) ||
+        Boolean(application.finalShortlistDecision));
+
+    if (!isFinalist) {
+      throw AppError.badRequest(
+        'Candidate has not completed all dynamic funnel stages and cannot have a final shortlist decision recorded.'
+      );
+    }
+
+    application.finalShortlistDecision = decision;
+
+    if (decision === 'offered') {
+      application.status = 'offered';
+      application.offeredAt = new Date();
+    } else if (decision === 'on_hold') {
+      application.status = 'shortlisted';
+    } else if (decision === 'rejected') {
+      application.status = 'rejected';
+    }
+
+    if (notes) {
+      application.notes = notes;
+    }
+
+    await application.save();
+
+    // Record stage history audit entry
+    await this.recordStageHistory({
+      applicationId: application._id,
+      jobId: application.jobId,
+      candidateId: application.userId,
+      stageId: 'stage_final_shortlist',
+      stageName: 'Final Shortlist Review',
+      stageIndex: totalStages + 1,
+      status: decision === 'rejected' ? 'failed' : 'passed',
+      score: application.compositeRank,
+      notes: notes || `Recruiter decision: ${decision}`,
+      promotedFromReserve: false,
+      enteredAt: new Date(),
+      completedAt: new Date(),
+    });
+
+    return {
+      applicationId: String(application._id),
+      decision: application.finalShortlistDecision,
+      status: application.status,
+      offeredAt: application.offeredAt,
+      hiredAt: application.hiredAt,
+      notes: application.notes,
+      updatedAt: application.updatedAt,
+    };
   }
 
   /**

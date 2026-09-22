@@ -7,6 +7,7 @@ import {
   advanceCandidateSchema,
   failCandidateSchema,
   refillStageSchema,
+  finalDecisionSchema,
 } from './hiringEngine.validator.js';
 
 // MergeParams: true allows accessing :jobId from parent route prefix
@@ -46,6 +47,14 @@ router.post('/stages/:stageId/refill', validate(refillStageSchema), HiringEngine
 // Candidate Stage Transition Audit History
 router.get('/candidates/:applicationId/history', HiringEngineController.getCandidateHistory);
 
+// Final Shortlist & Offer Management Layer
+router.get('/final-shortlist', HiringEngineController.getFinalShortlist);
+router.post(
+  '/final-shortlist/:applicationId/decision',
+  validate(finalDecisionSchema),
+  HiringEngineController.recordFinalDecision
+);
+
 // Application Collection & Adaptive Pipeline
 router.get('/application-collection', HiringEngineController.getApplicationCollection);
 router.post('/application-collection/start', HiringEngineController.startApplicationCollection);
@@ -53,3 +62,4 @@ router.post('/application-collection/extend', HiringEngineController.extendAppli
 router.post('/start', HiringEngineController.startApplicationCollection);
 
 export default router;
+

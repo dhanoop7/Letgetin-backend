@@ -4,11 +4,13 @@ import { env } from '../config/env.js';
 export const getRedisConnectionOptions = (): ConnectionOptions => {
   try {
     const url = new URL(env.REDIS_URL);
+    const isTls = url.protocol === 'rediss:';
     return {
       host: url.hostname || 'localhost',
       port: url.port ? parseInt(url.port, 10) : 6379,
       password: url.password ? decodeURIComponent(url.password) : undefined,
       username: url.username ? decodeURIComponent(url.username) : undefined,
+      tls: isTls ? {} : undefined,
       maxRetriesPerRequest: null,
       enableReadyCheck: false,
     };

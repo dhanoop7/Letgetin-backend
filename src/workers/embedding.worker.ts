@@ -12,6 +12,7 @@ import { CandidateProfileModel } from '../modules/job/candidateProfile.model.js'
 import { UserProfileModel } from '../modules/profile/profile.model.js';
 import { ResumeModel } from '../modules/resume/resume.model.js';
 import { UserModel } from '../modules/user/user.model.js';
+import { CandidateDataResolver } from '../modules/profile/candidateDataResolver.js';
 import { embeddingService } from '../modules/embedding/embedding.service.js';
 import { redisService } from '../services/redis.service.js';
 
@@ -137,104 +138,18 @@ export const createCandidateEmbeddingWorker = (): Worker<CandidateEmbeddingPaylo
 
         const currentVersion = userProfile?.version || 1;
 
-        // 3. Build composite candidate profile representation
-        let skills: string[] = [];
-        let headline = '';
-        let summary = '';
-        let yearsOfExperience = 0;
-        let location = '';
-        let education = '';
-        let resumeContent: any = {};
+        // 3. Resolve unified candidate data across Profile, Resume, and CandidateProfile
+        const resolved = CandidateDataResolver.resolve({
+          userId,
+          user,
+          userProfile,
+          resume: latestResume,
+          candidateProfile,
+        });
 
-        if (latestResume && latestResume.content) {
-          resumeContent = { ...(latestResume.content as any) };
-          headline = resumeContent.personalInfo?.headline || '';
-          summary = resumeContent.summary || '';
-          location = resumeContent.personalInfo?.location || '';
-
-          if (Array.isArray(resumeContent.skills)) {
-            skills = resumeContent.skills
-              .map((s: any) => (typeof s === 'string' ? s : s.name))
-              .filter(Boolean);
-          }
-
-          if (Array.isArray(resumeContent.experiences)) {
-            yearsOfExperience = Math.min(25, Math.max(1, resumeContent.experiences.length * 2));
-          }
-
-          if (Array.isArray(resumeContent.educations) && resumeContent.educations.length > 0) {
-            const edu = resumeContent.educations[0];
-            education = `${edu.degree || ''} ${edu.fieldOfStudy || ''} - ${edu.institution || ''}`.trim();
-          }
-        } else if (user) {
-          headline = user.fullName ? `${user.fullName}'s Profile` : 'Software Professional';
-          skills = ['React', 'TypeScript', 'Node.js', 'JavaScript'];
-        }
-
-        if (userProfile) {
-          if (Array.isArray(userProfile.skills) && userProfile.skills.length > 0) {
-            const combinedSkills = Array.from(new Set([...userProfile.skills, ...skills]));
-            skills = combinedSkills;
-          }
-          if (userProfile.personal?.headline) {
-            headline = userProfile.personal.headline;
-          } else if (userProfile.experience?.title && !headline) {
-            headline = userProfile.experience.title;
-          }
-          if (userProfile.personal?.bio) {
-            summary = userProfile.personal.bio;
-          }
-          if (userProfile.contact?.city || userProfile.contact?.country) {
-            const parts = [userProfile.contact.city, userProfile.contact.country].filter(Boolean);
-            if (parts.length > 0) {
-              location = parts.join(', ');
-            }
-          }
-          if (userProfile.track === 'fresher') {
-            yearsOfExperience = 0;
-          } else if (userProfile.experiencesList && userProfile.experiencesList.length > 0) {
-            yearsOfExperience = Math.min(25, Math.max(1, userProfile.experiencesList.length * 2));
-          }
-          if (userProfile.educationsList && userProfile.educationsList.length > 0) {
-            const topEdu = userProfile.educationsList[0];
-            education = `${topEdu.degree || ''} - ${topEdu.institution || ''}`.trim();
-          } else if (userProfile.education?.institution) {
-            education = `${userProfile.education.degree || ''} - ${userProfile.education.institution || ''}`.trim();
-          }
-
-          resumeContent = {
-            ...resumeContent,
-            personalInfo: {
-              ...resumeContent.personalInfo,
-              fullName: userProfile.contact?.fullName || user?.fullName,
-              headline: headline,
-              location: location,
-            },
-            summary: summary,
-            skills: skills,
-            experiences:
-              userProfile.experiencesList && userProfile.experiencesList.length > 0
-                ? userProfile.experiencesList.map((e) => ({
-                    company: e.company,
-                    position: e.title,
-                    startDate: e.start,
-                    endDate: e.end,
-                    highlights: e.highlights ? [e.highlights] : [],
-                  }))
-                : resumeContent.experiences,
-            educations:
-              userProfile.educationsList && userProfile.educationsList.length > 0
-                ? userProfile.educationsList.map((e) => ({
-                    institution: e.institution,
-                    degree: e.degree,
-                    startDate: e.startYear,
-                    endDate: e.endYear,
-                  }))
-                : resumeContent.educations,
-          };
-        }
-
-        const normalizedText = embeddingService.buildCandidateEmbeddingText(resumeContent, user || undefined);
+        const embeddingPayload = CandidateDataResolver.toEmbeddingPayload(resolved);
+        const normalizedText = embeddingService.buildCandidateEmbeddingText(embeddingPayload, user || undefined);
+        const educationStr = CandidateDataResolver.getPrimaryEducationString(resolved);
 
         // 4. Idempotency check:
         // If already completed with identical version, matching rawText, and valid embedding, skip redundant API computation
@@ -257,12 +172,12 @@ export const createCandidateEmbeddingWorker = (): Worker<CandidateEmbeddingPaylo
           {
             $set: {
               resumeId: latestResume?._id,
-              headline,
-              summary,
-              skills,
-              yearsOfExperience,
-              location,
-              education,
+              headline: resolved.headline,
+              summary: resolved.summary,
+              skills: resolved.skills,
+              yearsOfExperience: resolved.totalExperienceYears,
+              location: resolved.location,
+              education: educationStr,
               rawText: normalizedText,
               profileVersion: currentVersion,
               embeddingStatus: 'processing',

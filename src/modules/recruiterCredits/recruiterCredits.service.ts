@@ -11,6 +11,7 @@ import { JobModel } from '../job/job.model.js';
 import { UserModel } from '../user/user.model.js';
 import { ResumeModel } from '../resume/resume.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
+import { ExperienceCalculator } from '../profile/experienceCalculator.js';
 import { embeddingService } from '../embedding/embedding.service.js';
 import { AppError } from '../../utils/appError.js';
 import { CREDIT_PACKS } from './creditPacks.constants.js';
@@ -402,7 +403,7 @@ export class RecruiterCreditsService {
           certificates,
           languages,
           socialLinks,
-          yearsOfExperience: profile.yearsOfExperience || (experiences.length > 0 ? experiences.length * 2 : 0),
+          yearsOfExperience: profile.yearsOfExperience || ExperienceCalculator.calculateTotalExperience(experiences).totalYears,
           matchScore: Math.max(10, Math.min(99, Math.round(score * 100))),
           email: isRevealed ? profile.userId?.email : maskEmail(profile.userId?.email),
           phone: isRevealed ? profile.userId?.phone : maskPhone(profile.userId?.phone),

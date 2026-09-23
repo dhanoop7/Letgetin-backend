@@ -4,6 +4,8 @@ import { JobModel } from '../job/job.model.js';
 import { ResumeModel } from '../resume/resume.model.js';
 import { UserModel } from '../user/user.model.js';
 import { CandidateProfileModel } from '../job/candidateProfile.model.js';
+import { UserProfileModel } from '../profile/profile.model.js';
+import { CandidateDataResolver } from '../profile/candidateDataResolver.js';
 import { embeddingService } from '../embedding/embedding.service.js';
 import { AtsService } from '../ai/services/ats.service.js';
 import { AppError } from '../../utils/appError.js';
@@ -57,31 +59,25 @@ export class ResumeScreeningService {
     application.resumeScreeningStatus = 'ai_reviewing';
     await application.save();
 
-    // 2. Fetch candidate resume and candidate profile
-    const [resume, candidateProfile, user] = await Promise.all([
+    // 2. Fetch candidate resume, candidate profile, user profile, and user
+    const [resume, candidateProfile, user, userProfile] = await Promise.all([
       application.resumeId ? ResumeModel.findById(application.resumeId).lean() : null,
       CandidateProfileModel.findOne({ userId: application.userId }).lean(),
       UserModel.findById(application.userId).select('fullName email').lean(),
+      UserProfileModel.findOne({ userId: application.userId }).lean(),
     ]);
 
+    // Resolve unified candidate data across profile and resume
+    const resolved = CandidateDataResolver.resolve({
+      userId: application.userId?.toString(),
+      user,
+      userProfile,
+      resume,
+      candidateProfile,
+    });
+
     const jobSkills = Array.isArray(job.skills) ? job.skills : [];
-    
-    // Extract candidate skills from resume content and candidate profile
-    let candidateSkills: string[] = [];
-    if (candidateProfile?.skills && Array.isArray(candidateProfile.skills)) {
-      candidateSkills = [...candidateProfile.skills];
-    }
-    if (resume?.content && typeof resume.content === 'object') {
-      const rc = resume.content as any;
-      if (Array.isArray(rc.skills)) {
-        for (const sk of rc.skills) {
-          const name = typeof sk === 'string' ? sk : sk?.name;
-          if (name && !candidateSkills.includes(name)) {
-            candidateSkills.push(name);
-          }
-        }
-      }
-    }
+    const candidateSkills = resolved.skills;
 
     // 3. Compute Skills Match using EmbeddingService
     const skillAnalysis = embeddingService.calculateSkillsMatch(jobSkills, candidateSkills);
@@ -90,7 +86,9 @@ export class ResumeScreeningService {
     const missingSkills = skillAnalysis.missing;
 
     // 4. Compute Experience Match Score
-    const candidateYears = candidateProfile?.yearsOfExperience || 0;
+    const candidateYears = resolved.isFresher
+      ? 0
+      : (resolved.totalExperienceYears > 0 ? resolved.totalExperienceYears : (candidateProfile?.yearsOfExperience || 0));
     const minExp = typeof job.minimumExperience === 'number' ? job.minimumExperience : 0;
     const maxExp = typeof job.maximumExperience === 'number' ? job.maximumExperience : undefined;
     

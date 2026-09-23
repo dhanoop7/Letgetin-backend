@@ -1,11 +1,13 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel } from './job.model.js';
+import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobRequirements, formatEducationRequirements } from './job.model.js';
+import { normalizeJobRequirements } from './jobRequirements.utils.js';
 import { CandidateProfileModel, ICandidateProfileDocument } from './candidateProfile.model.js';
 import { RecruiterOrgRepository } from '../recruiterOrg/recruiterOrg.repository.js';
 import { ResumeModel } from '../resume/resume.model.js';
 import { UserModel } from '../user/user.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
+import { CandidateDataResolver } from '../profile/candidateDataResolver.js';
 import { embeddingService } from '../embedding/embedding.service.js';
 import { enqueueCandidateEmbedding,enqueueJobEmbedding } from '../../queues/queue.config.js';
 
@@ -94,104 +96,16 @@ export class JobService {
       UserProfileModel.findOne({ userId: userObjectId }).lean(),
     ]);
 
-    let skills: string[] = [];
-    let headline = '';
-    let summary = '';
-    let yearsOfExperience = 0;
-    let location = '';
-    let education = '';
-    let resumeContent: any = {};
+    const resolved = CandidateDataResolver.resolve({
+      userId,
+      user,
+      userProfile,
+      resume: latestResume,
+    });
 
-    if (latestResume && latestResume.content) {
-      resumeContent = { ...(latestResume.content as any) };
-      headline = resumeContent.personalInfo?.headline || '';
-      summary = resumeContent.summary || '';
-      location = resumeContent.personalInfo?.location || '';
-
-      if (Array.isArray(resumeContent.skills)) {
-        skills = resumeContent.skills
-          .map((s: any) => (typeof s === 'string' ? s : s.name))
-          .filter(Boolean);
-      }
-
-      if (Array.isArray(resumeContent.experiences)) {
-        yearsOfExperience = Math.min(25, Math.max(1, resumeContent.experiences.length * 2));
-      }
-
-      if (Array.isArray(resumeContent.educations) && resumeContent.educations.length > 0) {
-        const edu = resumeContent.educations[0];
-        education = `${edu.degree || ''} ${edu.fieldOfStudy || ''} - ${edu.institution || ''}`.trim();
-      }
-    } else if (user) {
-      headline = user.fullName ? `${user.fullName}'s Profile` : 'Software Professional';
-      skills = ['React', 'TypeScript', 'Node.js', 'JavaScript'];
-    }
-
-    // Override/augment with UserProfile data from /profile route if present
-    if (userProfile) {
-      if (Array.isArray(userProfile.skills) && userProfile.skills.length > 0) {
-        // Merge or prioritize profile skills
-        const combinedSkills = Array.from(new Set([...userProfile.skills, ...skills]));
-        skills = combinedSkills;
-      }
-      if (userProfile.personal?.headline) {
-        headline = userProfile.personal.headline;
-      } else if (userProfile.experience?.title && !headline) {
-        headline = userProfile.experience.title;
-      }
-      if (userProfile.personal?.bio) {
-        summary = userProfile.personal.bio;
-      }
-      if (userProfile.contact?.city || userProfile.contact?.country) {
-        const parts = [userProfile.contact.city, userProfile.contact.country].filter(Boolean);
-        if (parts.length > 0) {
-          location = parts.join(', ');
-        }
-      }
-      if (userProfile.track === 'fresher') {
-        yearsOfExperience = 0;
-      } else if (userProfile.experiencesList && userProfile.experiencesList.length > 0) {
-        yearsOfExperience = Math.min(25, Math.max(1, userProfile.experiencesList.length * 2));
-      }
-      if (userProfile.educationsList && userProfile.educationsList.length > 0) {
-        const topEdu = userProfile.educationsList[0];
-        education = `${topEdu.degree || ''} - ${topEdu.institution || ''}`.trim();
-      } else if (userProfile.education?.institution) {
-        education = `${userProfile.education.degree || ''} - ${userProfile.education.institution || ''}`.trim();
-      }
-
-      // Build composite resumeContent for rich semantic embedding representation
-      resumeContent = {
-        ...resumeContent,
-        personalInfo: {
-          ...resumeContent.personalInfo,
-          fullName: userProfile.contact?.fullName || user?.fullName,
-          headline: headline,
-          location: location,
-        },
-        summary: summary,
-        skills: skills,
-        experiences: userProfile.experiencesList && userProfile.experiencesList.length > 0
-          ? userProfile.experiencesList.map((e) => ({
-              company: e.company,
-              position: e.title,
-              startDate: e.start,
-              endDate: e.end,
-              highlights: e.highlights ? [e.highlights] : [],
-            }))
-          : resumeContent.experiences,
-        educations: userProfile.educationsList && userProfile.educationsList.length > 0
-          ? userProfile.educationsList.map((e) => ({
-              institution: e.institution,
-              degree: e.degree,
-              startDate: e.startYear,
-              endDate: e.endYear,
-            }))
-          : resumeContent.educations,
-      };
-    }
-
-    const rawText = embeddingService.buildCandidateEmbeddingText(resumeContent, user || undefined);
+    const embeddingPayload = CandidateDataResolver.toEmbeddingPayload(resolved);
+    const rawText = embeddingService.buildCandidateEmbeddingText(embeddingPayload, user || undefined);
+    const education = CandidateDataResolver.getPrimaryEducationString(resolved);
 
     let profile = await CandidateProfileModel.findOne({ userId: userObjectId });
 
@@ -204,11 +118,11 @@ export class JobService {
       profile = await CandidateProfileModel.create({
         userId: userObjectId,
         resumeId: latestResume?._id,
-        headline,
-        summary,
-        skills,
-        yearsOfExperience,
-        location,
+        headline: resolved.headline,
+        summary: resolved.summary,
+        skills: resolved.skills,
+        yearsOfExperience: resolved.totalExperienceYears,
+        location: resolved.location,
         education,
         rawText,
         profileVersion: currentVersion,
@@ -218,11 +132,11 @@ export class JobService {
       await enqueueCandidateEmbedding(userId, latestResume?._id?.toString());
     } else if (textChanged || needsEmbedding) {
       profile.resumeId = latestResume?._id as any;
-      profile.headline = headline;
-      profile.summary = summary;
-      profile.skills = skills;
-      profile.yearsOfExperience = yearsOfExperience;
-      profile.location = location;
+      profile.headline = resolved.headline;
+      profile.summary = resolved.summary;
+      profile.skills = resolved.skills;
+      profile.yearsOfExperience = resolved.totalExperienceYears;
+      profile.location = resolved.location;
       profile.education = education;
       profile.rawText = rawText;
       profile.profileVersion = currentVersion;
@@ -701,17 +615,50 @@ export class JobService {
       deadlineDate = new Date(Date.now() + 7 * 24 * 3600 * 1000);
     }
 
+    const structuredRequirements = normalizeJobRequirements({
+      requiredSkills: data.structuredRequirements?.requiredSkills,
+      preferredSkills: data.structuredRequirements?.preferredSkills,
+      minimumExperienceYears: data.structuredRequirements?.minimumExperienceYears,
+      maximumExperienceYears: data.structuredRequirements?.maximumExperienceYears,
+      education: data.structuredRequirements?.education,
+      skills: data.skills,
+      minimumExperience: data.minimumExperience,
+      maximumExperience: data.maximumExperience,
+    });
+
+    const combinedSkills = Array.from(
+      new Set([...structuredRequirements.requiredSkills, ...structuredRequirements.preferredSkills])
+    );
+    const educationRequirementsText = formatEducationRequirements(structuredRequirements.education);
+
+    let locationDoc = { city: '', state: '', country: 'India', remote: data.workplaceType === 'remote' };
+    if (data.location && typeof data.location === 'string') {
+      const parts = data.location.split(',').map((p) => p.trim()).filter(Boolean);
+      if (parts.length === 1) {
+        locationDoc.city = parts[0];
+      } else if (parts.length >= 2) {
+        locationDoc.city = parts[0];
+        locationDoc.country = parts[parts.length - 1];
+        if (parts.length > 2) locationDoc.state = parts[1];
+      }
+    }
+
     const job = await JobModel.create({
       title: data.title?.trim() || 'Untitled role',
       company: { name: data.companyName?.trim() || org?.name || 'My Organization', website: org?.website },
       description: data.description?.trim() || 'No description provided yet.',
-      skills: data.skills || [],
+      responsibilities: Array.isArray(data.responsibilities) ? data.responsibilities : [],
+      requirements: Array.isArray(data.requirements) ? data.requirements : [],
+      preferredQualifications: Array.isArray(data.preferredQualifications) ? data.preferredQualifications : [],
+      skills: combinedSkills.length > 0 ? combinedSkills : (data.skills || []),
       experienceLevel: 'mid',
-      minimumExperience: 0,
-      maximumExperience: 5,
+      minimumExperience: structuredRequirements.minimumExperienceYears !== undefined ? structuredRequirements.minimumExperienceYears : 0,
+      maximumExperience: structuredRequirements.maximumExperienceYears,
+      educationRequirements: educationRequirementsText,
+      structuredRequirements,
       employmentType: data.employmentType || 'full-time',
       workplaceType: data.workplaceType || 'remote',
-      location: { country: 'India', remote: data.workplaceType === 'remote' },
+      location: locationDoc,
       salaryText: data.salaryText?.trim() || undefined,
       eligibilityMinPercent: data.eligibilityMinPercent,
       finalShortlistTarget: data.finalShortlistTarget,
@@ -998,6 +945,12 @@ export interface RecruiterJobInput {
   salaryText?: string;
   skills?: string[];
   description?: string;
+  responsibilities?: string[];
+  requirements?: string[];
+  preferredQualifications?: string[];
+  minimumExperience?: number;
+  maximumExperience?: number;
+  structuredRequirements?: IJobRequirements;
   eligibilityMinPercent?: number;
   deadline?: string;
   saveAsDraft?: boolean;

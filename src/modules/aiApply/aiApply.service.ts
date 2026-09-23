@@ -255,13 +255,15 @@ export class AiApplyService {
       embeddingStatus: string;
     };
     appliedJobIds: string[];
+    availableJobs: number;
   }> {
     const userObjectId = new mongoose.Types.ObjectId(userId);
 
-    const [preferences, applications, candidateProfileDoc] = await Promise.all([
+    const [preferences, applications, candidateProfileDoc, availableJobs] = await Promise.all([
       AiApplyPreferencesModel.findOne({ userId: userObjectId }).lean(),
       ApplicationModel.find({ userId: userObjectId }).select('jobId status matchScore').lean(),
       CandidateProfileModel.findOne({ userId: userObjectId }).lean(),
+      JobModel.countDocuments({ status: 'active' }),
     ]);
 
     const appliedJobIdSet = new Set(applications.map((a) => String(a.jobId)));
@@ -413,6 +415,7 @@ export class AiApplyService {
         embeddingStatus: candidateProfileDoc?.embeddingStatus || 'completed',
       },
       appliedJobIds: Array.from(appliedJobIdSet),
+      availableJobs,
     };
   }
 

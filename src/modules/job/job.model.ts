@@ -29,6 +29,53 @@ export interface IApplicationCollection {
   status: ApplicationCollectionStatus;
 }
 
+export type EducationLevel =
+  | 'none'
+  | 'high_school'
+  | 'associate'
+  | 'diploma'
+  | 'bachelor'
+  | 'master'
+  | 'doctorate'
+  | 'other';
+
+export interface IJobEducationRequirement {
+  minimumLevel?: EducationLevel;
+  fields?: string[];
+}
+
+export interface IJobRequirements {
+  requiredSkills: string[];
+  preferredSkills: string[];
+  minimumExperienceYears?: number;
+  maximumExperienceYears?: number;
+  education?: IJobEducationRequirement;
+}
+
+export function formatEducationRequirements(edu?: IJobEducationRequirement): string {
+  if (!edu || !edu.minimumLevel || edu.minimumLevel === 'none') {
+    return 'No specific education requirement';
+  }
+  const levelNames: Record<EducationLevel, string> = {
+    none: 'No specific education requirement',
+    high_school: 'High School Diploma',
+    associate: 'Associate Degree',
+    diploma: 'Diploma',
+    bachelor: "Bachelor's Degree",
+    master: "Master's Degree",
+    doctorate: 'Doctorate / Ph.D.',
+    other: 'Degree / Equivalent Qualification',
+  };
+  const base = levelNames[edu.minimumLevel] || edu.minimumLevel;
+  if (edu.fields && edu.fields.length > 0) {
+    const fieldList = edu.fields.filter(Boolean).join(', ');
+    if (fieldList) {
+      return `${base} in ${fieldList}`;
+    }
+  }
+  return base;
+}
+
 export interface IJobDocument extends Document {
   title: string;
   company: {
@@ -59,6 +106,7 @@ export interface IJobDocument extends Document {
     period: 'yearly' | 'monthly' | 'hourly';
   };
   educationRequirements?: string;
+  structuredRequirements?: IJobRequirements;
   benefits: string[];
   applicationUrl: string;
   source: string;
@@ -98,6 +146,32 @@ export interface IJobDocument extends Document {
   updatedAt: Date;
 }
 
+const JobEducationSchema = new Schema(
+  {
+    minimumLevel: {
+      type: String,
+      enum: ['none', 'high_school', 'associate', 'diploma', 'bachelor', 'master', 'doctorate', 'other'],
+      default: 'none',
+    },
+    fields: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+const JobRequirementsSchema = new Schema(
+  {
+    requiredSkills: { type: [String], default: [], index: true },
+    preferredSkills: { type: [String], default: [] },
+    minimumExperienceYears: { type: Number, min: 0 },
+    maximumExperienceYears: { type: Number, min: 0 },
+    education: {
+      type: JobEducationSchema,
+      default: () => ({ minimumLevel: 'none', fields: [] }),
+    },
+  },
+  { _id: false }
+);
+
 const JobSchema = new Schema<IJobDocument>(
   {
     title: { type: String, required: true, trim: true, index: true },
@@ -118,7 +192,7 @@ const JobSchema = new Schema<IJobDocument>(
       index: true,
     },
     minimumExperience: { type: Number, default: 0, min: 0 },
-    maximumExperience: { type: Number, default: 10, min: 0 },
+    maximumExperience: { type: Number, min: 0, default: undefined },
     employmentType: {
       type: String,
       enum: ['full-time', 'part-time', 'contract', 'internship', 'freelance'],
@@ -143,7 +217,8 @@ const JobSchema = new Schema<IJobDocument>(
       currency: { type: String, default: 'INR' },
       period: { type: String, enum: ['yearly', 'monthly', 'hourly'], default: 'yearly' },
     },
-    educationRequirements: { type: String, default: "Bachelor's Degree in Computer Science or related field" },
+    educationRequirements: { type: String, default: undefined },
+    structuredRequirements: { type: JobRequirementsSchema, default: undefined },
     benefits: { type: [String], default: [] },
     applicationUrl: { type: String, default: '' },
     source: { type: String, default: 'seed' },

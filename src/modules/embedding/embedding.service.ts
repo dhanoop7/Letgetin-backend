@@ -1,5 +1,6 @@
 import { IEmbeddingProvider, EmbeddingResult } from './embedding.types.js';
 import { GoogleEmbeddingProvider } from './providers/google.embedding.provider.js';
+import { formatEducationRequirements } from '../job/job.model.js';
 import { env } from '../../config/env.js';
 
 export class EmbeddingService {
@@ -59,6 +60,16 @@ export class EmbeddingService {
     workplaceType?: string;
     location?: { city?: string; state?: string; country?: string; remote?: boolean };
     educationRequirements?: string;
+    structuredRequirements?: {
+      requiredSkills?: string[];
+      preferredSkills?: string[];
+      minimumExperienceYears?: number;
+      maximumExperienceYears?: number;
+      education?: {
+        minimumLevel?: any;
+        fields?: string[];
+      };
+    };
   }): string {
     const parts: string[] = [];
 
@@ -71,10 +82,13 @@ export class EmbeddingService {
     // Role specifics
     const roleInfo: string[] = [];
     if (job.experienceLevel) roleInfo.push(`Level: ${job.experienceLevel}`);
-    if (job.minimumExperience !== undefined && job.maximumExperience !== undefined) {
-      roleInfo.push(`Experience: ${job.minimumExperience}-${job.maximumExperience} years`);
-    } else if (job.minimumExperience !== undefined) {
-      roleInfo.push(`Min Experience: ${job.minimumExperience} years`);
+
+    const minExp = job.structuredRequirements?.minimumExperienceYears ?? job.minimumExperience;
+    const maxExp = job.structuredRequirements?.maximumExperienceYears ?? job.maximumExperience;
+    if (minExp !== undefined && maxExp !== undefined) {
+      roleInfo.push(`Experience: ${minExp}-${maxExp} years`);
+    } else if (minExp !== undefined && minExp > 0) {
+      roleInfo.push(`Min Experience: ${minExp} years`);
     }
     if (job.employmentType) roleInfo.push(`Type: ${job.employmentType}`);
     if (job.workplaceType) roleInfo.push(`Workplace: ${job.workplaceType}`);
@@ -89,12 +103,25 @@ export class EmbeddingService {
     }
 
     // Skills
-    if (job.skills && job.skills.length > 0) {
-      parts.push(`Required Skills:\n${job.skills.join(', ')}`);
+    const reqSkills = job.structuredRequirements?.requiredSkills?.length
+      ? job.structuredRequirements.requiredSkills
+      : (job.skills || []);
+    const prefSkills = job.structuredRequirements?.preferredSkills || [];
+
+    if (reqSkills.length > 0) {
+      parts.push(`Required Skills:\n${reqSkills.join(', ')}`);
+    }
+    if (prefSkills.length > 0) {
+      parts.push(`Preferred Skills:\n${prefSkills.join(', ')}`);
     }
 
     // Education
-    if (job.educationRequirements) {
+    if (job.structuredRequirements?.education) {
+      const eduStr = formatEducationRequirements(job.structuredRequirements.education as any);
+      if (eduStr && eduStr !== 'No specific education requirement') {
+        parts.push(`Education:\n${eduStr}`);
+      }
+    } else if (job.educationRequirements) {
       parts.push(`Education:\n${job.educationRequirements}`);
     }
 

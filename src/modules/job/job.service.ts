@@ -1,7 +1,8 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobRequirements, formatEducationRequirements } from './job.model.js';
+import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobRequirements, IJobSkillRequirement, formatEducationRequirements, IJobAssessmentConfig } from './job.model.js';
 import { normalizeJobRequirements } from './jobRequirements.utils.js';
+import { normalizeAssessmentConfiguration, DEFAULT_ASSESSMENT_NAMES } from './assessmentConfig.utils.js';
 import { CandidateProfileModel, ICandidateProfileDocument } from './candidateProfile.model.js';
 import { RecruiterOrgRepository } from '../recruiterOrg/recruiterOrg.repository.js';
 import { ResumeModel } from '../resume/resume.model.js';
@@ -590,10 +591,33 @@ export class JobService {
   async createRecruiterJob(userId: string, data: RecruiterJobInput): Promise<any> {
     const org = await new RecruiterOrgRepository().findByOwnerUserId(userId);
     const isDraft = !!data.saveAsDraft;
+
+    // Normalize assessment configuration
+    const normalizedAssessment = data.assessment
+      ? normalizeAssessmentConfiguration(data.assessment)
+      : (data.pipelineOptions?.assessment && Array.isArray(data.pipelineOptions.assessmentTypes) && data.pipelineOptions.assessmentTypes.length > 0)
+      ? normalizeAssessmentConfiguration({
+          enabled: true,
+          rounds: data.pipelineOptions.assessmentTypes.map((t, idx) => ({
+            id: `round_${t}`,
+            type: t as any,
+            order: idx + 1,
+            name: DEFAULT_ASSESSMENT_NAMES[t as keyof typeof DEFAULT_ASSESSMENT_NAMES] || `${t} Assessment`,
+            enabled: true,
+          })),
+        })
+      : undefined;
+
     // Selection is persisted regardless of draft/publish so a draft can be resumed later —
     // only the credit charge itself is gated on actually publishing.
-    const sanitizedPipeline = sanitizePipelineSelection(data.pipelineOptions);
-    const creditsCost = isDraft ? 0 : computePipelineCreditsCost(data.pipelineOptions);
+    const pipelineSelection = { ...data.pipelineOptions };
+    if (normalizedAssessment && normalizedAssessment.enabled && normalizedAssessment.rounds.length > 0) {
+      pipelineSelection.assessment = true;
+      pipelineSelection.assessmentTypes = normalizedAssessment.rounds.map((r) => r.type);
+    }
+
+    const sanitizedPipeline = sanitizePipelineSelection(pipelineSelection);
+    const creditsCost = isDraft ? 0 : computePipelineCreditsCost(pipelineSelection);
 
     if (!isDraft && creditsCost > 0 && org) {
       const balance = await recruiterCreditsService.getBalanceForOrg(org._id.toString());
@@ -627,7 +651,10 @@ export class JobService {
     });
 
     const combinedSkills = Array.from(
-      new Set([...structuredRequirements.requiredSkills, ...structuredRequirements.preferredSkills])
+      new Set([
+        ...structuredRequirements.requiredSkills.map((s: any) => (typeof s === 'string' ? s : s.name)),
+        ...structuredRequirements.preferredSkills.map((s: any) => (typeof s === 'string' ? s : s.name)),
+      ])
     );
     const educationRequirementsText = formatEducationRequirements(structuredRequirements.education);
 
@@ -643,6 +670,10 @@ export class JobService {
       }
     }
 
+    const fallbackSkills = Array.isArray(data.skills)
+      ? data.skills.map((s: any) => (typeof s === 'string' ? s : s.name)).filter(Boolean)
+      : [];
+
     const job = await JobModel.create({
       title: data.title?.trim() || 'Untitled role',
       company: { name: data.companyName?.trim() || org?.name || 'My Organization', website: org?.website },
@@ -650,7 +681,7 @@ export class JobService {
       responsibilities: Array.isArray(data.responsibilities) ? data.responsibilities : [],
       requirements: Array.isArray(data.requirements) ? data.requirements : [],
       preferredQualifications: Array.isArray(data.preferredQualifications) ? data.preferredQualifications : [],
-      skills: combinedSkills.length > 0 ? combinedSkills : (data.skills || []),
+      skills: combinedSkills.length > 0 ? combinedSkills : fallbackSkills,
       experienceLevel: 'mid',
       minimumExperience: structuredRequirements.minimumExperienceYears !== undefined ? structuredRequirements.minimumExperienceYears : 0,
       maximumExperience: structuredRequirements.maximumExperienceYears,
@@ -663,6 +694,7 @@ export class JobService {
       eligibilityMinPercent: data.eligibilityMinPercent,
       finalShortlistTarget: data.finalShortlistTarget,
       pipelineOptions: sanitizedPipeline,
+      assessment: normalizedAssessment,
       recruiterStage: 'open',
       creditsCost,
       status: isDraft ? 'draft' : 'active',
@@ -686,6 +718,7 @@ export class JobService {
       sanitizedPipeline?.assessment ||
       sanitizedPipeline?.aiInterview ||
       sanitizedPipeline?.humanInterview ||
+      (normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) ||
       (Array.isArray(data.rounds) && data.rounds.length > 0) ||
       (Array.isArray(data.stages) && data.stages.length > 0)
     );
@@ -701,6 +734,7 @@ export class JobService {
           stageId: string;
           stageName: string;
           stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
+          assessmentType?: 'general' | 'coding';
           order: number;
           expectedAttendanceRate: number;
           expectedPassRate: number;
@@ -713,7 +747,57 @@ export class JobService {
 
         const buildStageFromKey = (key: string, order: number): FunnelStageItem | null => {
           const k = String(key).toLowerCase().trim().replace(/[-\s]/g, '_');
-          if (k.includes('assess') || k === 'coding' || k === 'technical_assessment') {
+          if (k === 'general' || k === 'stage_assessment_general') {
+            return {
+              stageId: 'stage_assessment_general',
+              stageName: 'General Assessment',
+              stageType: 'assessment',
+              assessmentType: 'general',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 75,
+              autoRefillEnabled: true,
+            };
+          }
+          if (k === 'coding' || k === 'stage_assessment_coding') {
+            return {
+              stageId: 'stage_assessment_coding',
+              stageName: 'Coding Assessment',
+              stageType: 'assessment',
+              assessmentType: 'coding',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 75,
+              autoRefillEnabled: true,
+            };
+          }
+          // Legacy assessment type keys mapped to General Assessment
+          if (
+            k === 'mcq' ||
+            k === 'stage_assessment_mcq' ||
+            k === 'short_answer' ||
+            k === 'stage_assessment_short_answer' ||
+            k === 'scenario' ||
+            k === 'stage_assessment_scenario'
+          ) {
+            return {
+              stageId: 'stage_assessment_general',
+              stageName: 'General Assessment',
+              stageType: 'assessment',
+              assessmentType: 'general',
+              order,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 75,
+              autoRefillEnabled: true,
+            };
+          }
+          if (k.includes('assess') || k === 'technical_assessment') {
             return {
               stageId: 'stage_assessment',
               stageName: 'Technical Assessment',
@@ -778,6 +862,34 @@ export class JobService {
           };
         };
 
+        const buildAssessmentStages = (): FunnelStageItem[] => {
+          if (!normalizedAssessment?.enabled || normalizedAssessment.rounds.length === 0) {
+            return [{
+              stageId: 'stage_assessment',
+              stageName: 'Technical Assessment',
+              stageType: 'assessment',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 75,
+              autoRefillEnabled: true,
+            }];
+          }
+          return normalizedAssessment.rounds.map((round) => ({
+            stageId: `stage_assessment_${round.type}`,
+            stageName: round.name || DEFAULT_ASSESSMENT_NAMES[round.type] || 'Assessment',
+            stageType: 'assessment' as const,
+            assessmentType: round.type,
+            order: currentOrder++,
+            expectedAttendanceRate: 1.0,
+            expectedPassRate: 0.6,
+            deadlineHours: 48,
+            autoAdvanceScoreThreshold: 75,
+            autoRefillEnabled: true,
+          }));
+        };
+
         let currentOrder = 1;
         if (Array.isArray(data.stages) && data.stages.length > 0) {
           for (const st of data.stages) {
@@ -793,15 +905,28 @@ export class JobService {
           }
         } else if (Array.isArray(sanitizedPipeline?.roundOrder) && sanitizedPipeline.roundOrder.length > 0) {
           for (const round of sanitizedPipeline.roundOrder) {
-            const item = buildStageFromKey(round, currentOrder++);
-            if (item) stages.push(item);
+            const k = String(round).toLowerCase().trim().replace(/[-\s]/g, '_');
+            if (k.includes('assess') && normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) {
+              for (const ast of buildAssessmentStages()) {
+                stages.push(ast);
+              }
+            } else {
+              const item = buildStageFromKey(round, currentOrder++);
+              if (item) stages.push(item);
+            }
           }
         } else {
           if (sanitizedPipeline?.resumeMatch && !sanitizedPipeline?.assessment && !sanitizedPipeline?.aiInterview && !sanitizedPipeline?.humanInterview) {
             stages.push(buildStageFromKey('resume_match', currentOrder++)!);
           }
           if (sanitizedPipeline?.assessment) {
-            stages.push(buildStageFromKey('assessment', currentOrder++)!);
+            if (normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) {
+              for (const ast of buildAssessmentStages()) {
+                stages.push(ast);
+              }
+            } else {
+              stages.push(buildStageFromKey('assessment', currentOrder++)!);
+            }
           }
           if (sanitizedPipeline?.aiInterview) {
             stages.push(buildStageFromKey('ai_interview', currentOrder++)!);
@@ -943,14 +1068,23 @@ export interface RecruiterJobInput {
   employmentType?: EmploymentType;
   workplaceType?: WorkplaceType;
   salaryText?: string;
-  skills?: string[];
+  skills?: (IJobSkillRequirement | string)[];
   description?: string;
   responsibilities?: string[];
   requirements?: string[];
   preferredQualifications?: string[];
   minimumExperience?: number;
   maximumExperience?: number;
-  structuredRequirements?: IJobRequirements;
+  structuredRequirements?: {
+    requiredSkills?: (IJobSkillRequirement | string)[];
+    preferredSkills?: (IJobSkillRequirement | string)[];
+    minimumExperienceYears?: number;
+    maximumExperienceYears?: number;
+    education?: {
+      minimumLevel?: any;
+      fields?: string[];
+    };
+  };
   eligibilityMinPercent?: number;
   deadline?: string;
   saveAsDraft?: boolean;
@@ -964,6 +1098,7 @@ export interface RecruiterJobInput {
   autoStartEnabled?: boolean;
   rounds?: string[];
   stages?: any[];
+  assessment?: IJobAssessmentConfig;
   pipelineOptions?: {
     matchVolume?: string | null;
     resumeMatch?: boolean;

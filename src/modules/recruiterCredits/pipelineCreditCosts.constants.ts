@@ -14,9 +14,13 @@ export const PIPELINE_SUB_OPTIONS: Record<PipelineSection, PipelineSubOption[]> 
     { key: 'semanticAi', label: 'Semantic AI Match' },
   ],
   assessment: [
-    { key: 'basicAptitude', label: 'Basic Aptitude' },
+    { key: 'general', label: 'General Assessment' },
     { key: 'coding', label: 'Coding Assessment' },
+    { key: 'basicAptitude', label: 'Basic Aptitude' },
     { key: 'domain', label: 'Domain Assessment' },
+    { key: 'mcq', label: 'MCQ Assessment' },
+    { key: 'short_answer', label: 'Short Answer Assessment' },
+    { key: 'scenario', label: 'Scenario-Based Assessment' },
   ],
   aiInterview: [
     { key: 'screening', label: 'Screening' },

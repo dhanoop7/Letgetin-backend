@@ -12,6 +12,8 @@ import { UserModel } from '../user/user.model.js';
 import { ResumeModel } from '../resume/resume.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
 import { ExperienceCalculator } from '../profile/experienceCalculator.js';
+import { CandidateDataResolver } from '../profile/candidateDataResolver.js';
+import { candidateJobMatchingService } from '../matching/candidateJobMatching.service.js';
 import { embeddingService } from '../embedding/embedding.service.js';
 import { AppError } from '../../utils/appError.js';
 import { CREDIT_PACKS } from './creditPacks.constants.js';
@@ -165,11 +167,12 @@ export class RecruiterCreditsService {
     const limit = Math.min(50, params.limit || 20);
 
     let queryEmbedding: number[] | undefined;
+    let job: any = null;
     if (params.jobId) {
       if (!mongoose.Types.ObjectId.isValid(params.jobId)) {
         throw AppError.badRequest('Invalid jobId format');
       }
-      const job = await JobModel.findById(params.jobId);
+      job = await JobModel.findById(params.jobId);
       if (!job) {
         throw AppError.notFound('Job not found');
       }
@@ -186,7 +189,7 @@ export class RecruiterCreditsService {
           job.embeddingModel = result.model;
           job.embeddingVersion = result.version;
           job.embeddingStatus = 'completed';
-          await job.save().catch((e) => console.warn('[searchCandidates] Failed saving computed embedding to job:', e));
+          await job.save().catch((e: any) => console.warn('[searchCandidates] Failed saving computed embedding to job:', e));
         } catch (err: any) {
           console.warn('[searchCandidates] Failed generating job embedding on the fly:', err?.message || err);
         }
@@ -206,12 +209,14 @@ export class RecruiterCreditsService {
       throw AppError.internal('Unable to generate search vector for candidate matching');
     }
 
-    // Query completed candidate profiles first
-    let profiles = await CandidateProfileModel.find({ embeddingStatus: 'completed' })
+    // Query candidate profiles: for job matching, include all profiles; for text query, prioritize completed embeddings
+    let profiles = await CandidateProfileModel.find(
+      params.jobId ? {} : { embeddingStatus: 'completed' }
+    )
       .populate({ path: 'userId', select: 'fullName username email phone avatarUrl avatar role' })
       .lean();
 
-    // Fallback: If no completed profiles, query any available candidate profiles
+    // Fallback: If no completed profiles for text query, query any available candidate profiles
     if (profiles.length === 0) {
       profiles = await CandidateProfileModel.find({})
         .populate({ path: 'userId', select: 'fullName username email phone avatarUrl avatar role' })
@@ -258,18 +263,38 @@ export class RecruiterCreditsService {
 
     const ranked = validCandidateProfiles
       .map((profile: any) => {
-        let score = 0.5;
-        if (profile.embedding && profile.embedding.length > 0 && queryEmbedding && queryEmbedding.length > 0) {
-          score = embeddingService.cosineSimilarity(queryEmbedding, profile.embedding);
-        } else if (profile.skills && profile.skills.length > 0) {
-          score = 0.65;
-        }
-
         const candidateUserId = String(profile.userId._id);
         const isRevealed = revealedSet.has(candidateUserId);
         const candidateResumes = resumesByUserId.get(candidateUserId) || [];
         const latestResume = candidateResumes.find((r) => r.isActive) || candidateResumes[0] || null;
         const userProfile = userProfilesByUserId.get(candidateUserId) || null;
+
+        let score = 0.5;
+        let matchResult: any = null;
+
+        if (job) {
+          const resolved = CandidateDataResolver.resolve({
+            userId: candidateUserId,
+            user: profile.userId,
+            userProfile,
+            resume: latestResume,
+            candidateProfile: profile,
+          });
+
+          matchResult = candidateJobMatchingService.matchCandidateToJob(
+            resolved,
+            job,
+            {
+              candidateEmbedding: profile.embedding,
+              jobEmbedding: job.embedding,
+            }
+          );
+          score = matchResult.overallScore / 100;
+        } else if (profile.embedding && profile.embedding.length > 0 && queryEmbedding && queryEmbedding.length > 0) {
+          score = embeddingService.cosineSimilarity(queryEmbedding, profile.embedding);
+        } else if (profile.skills && profile.skills.length > 0) {
+          score = 0.65;
+        }
 
         const resumeContent = (latestResume?.content as any) || {};
         const personalInfo = resumeContent.personalInfo || {};
@@ -404,7 +429,8 @@ export class RecruiterCreditsService {
           languages,
           socialLinks,
           yearsOfExperience: profile.yearsOfExperience || ExperienceCalculator.calculateTotalExperience(experiences).totalYears,
-          matchScore: Math.max(10, Math.min(99, Math.round(score * 100))),
+          matchScore: matchResult ? matchResult.overallScore : Math.max(10, Math.min(99, Math.round(score * 100))),
+          matchBreakdown: matchResult?.breakdown,
           email: isRevealed ? profile.userId?.email : maskEmail(profile.userId?.email),
           phone: isRevealed ? profile.userId?.phone : maskPhone(profile.userId?.phone),
           contactRevealed: isRevealed,

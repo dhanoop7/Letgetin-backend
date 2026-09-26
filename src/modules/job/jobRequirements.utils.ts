@@ -1,4 +1,11 @@
-import { EducationLevel, IJobEducationRequirement, IJobRequirements } from './job.model.js';
+import {
+  EducationLevel,
+  IJobEducationRequirement,
+  IJobRequirements,
+  IJobSkillRequirement,
+  SkillProficiency,
+  SkillRequirementArray,
+} from './job.model.js';
 
 export const VALID_EDUCATION_LEVELS: EducationLevel[] = [
   'none',
@@ -10,6 +17,15 @@ export const VALID_EDUCATION_LEVELS: EducationLevel[] = [
   'doctorate',
   'other',
 ];
+
+export const VALID_PROFICIENCIES: SkillProficiency[] = [
+  'beginner',
+  'intermediate',
+  'advanced',
+  'expert',
+];
+
+export { SkillRequirementArray };
 
 /**
  * Normalizes user-supplied education level string into standard EducationLevel enum
@@ -29,7 +45,62 @@ export function normalizeEducationLevel(val?: string | null): EducationLevel {
 }
 
 /**
- * Normalizes and deduplicates an array of skill strings case-insensitively
+ * Normalizes a single skill item (string or object) into structured IJobSkillRequirement.
+ * Defaults legacy skills without proficiency to 'intermediate'.
+ */
+export function normalizeSkillRequirement(item: unknown): IJobSkillRequirement | null {
+  if (!item) return null;
+
+  if (typeof item === 'string') {
+    const trimmed = item.trim();
+    if (!trimmed) return null;
+    return { name: trimmed, proficiency: 'intermediate' };
+  }
+
+  if (typeof item === 'object') {
+    const obj = item as Record<string, unknown>;
+    const rawName = typeof obj.name === 'string' ? obj.name.trim() : '';
+    if (!rawName) return null;
+
+    let prof: SkillProficiency = 'intermediate';
+    if (typeof obj.proficiency === 'string') {
+      const p = obj.proficiency.toLowerCase().trim() as SkillProficiency;
+      if (VALID_PROFICIENCIES.includes(p)) {
+        prof = p;
+      }
+    }
+    return { name: rawName, proficiency: prof };
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes and deduplicates an array of skill items (strings or objects) into IJobSkillRequirement[].
+ * Case-insensitively deduplicates skills while preserving the first seen readable casing.
+ */
+export function normalizeSkillRequirementsList(skills: unknown): SkillRequirementArray {
+  if (!Array.isArray(skills)) return new SkillRequirementArray();
+  const seen = new Set<string>();
+  const result: IJobSkillRequirement[] = [];
+
+  for (const item of skills) {
+    const normalized = normalizeSkillRequirement(item);
+    if (!normalized) continue;
+
+    const lower = normalized.name.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      result.push(normalized);
+    }
+  }
+
+  return new SkillRequirementArray(...result);
+}
+
+/**
+ * Legacy string extractor: Normalizes and deduplicates an array of skills into plain string[]
+ * Supports inputs that are string[] or IJobSkillRequirement[].
  */
 export function normalizeSkillsList(skills: unknown): string[] {
   if (!Array.isArray(skills)) return [];
@@ -37,13 +108,18 @@ export function normalizeSkillsList(skills: unknown): string[] {
   const result: string[] = [];
 
   for (const item of skills) {
-    if (typeof item !== 'string') continue;
-    const trimmed = item.trim();
-    if (!trimmed) continue;
-    const lower = trimmed.toLowerCase();
+    let name = '';
+    if (typeof item === 'string') {
+      name = item.trim();
+    } else if (item && typeof item === 'object' && 'name' in item && typeof (item as any).name === 'string') {
+      name = (item as any).name.trim();
+    }
+    if (!name) continue;
+
+    const lower = name.toLowerCase();
     if (!seen.has(lower)) {
       seen.add(lower);
-      result.push(trimmed);
+      result.push(name);
     }
   }
 
@@ -58,11 +134,11 @@ export function normalizeSkillsList(skills: unknown): string[] {
 export function resolveRequiredAndPreferredSkills(
   rawRequired: unknown,
   rawPreferred: unknown
-): { requiredSkills: string[]; preferredSkills: string[] } {
-  const requiredSkills = normalizeSkillsList(rawRequired);
+): { requiredSkills: SkillRequirementArray; preferredSkills: string[] } {
+  const requiredSkills = normalizeSkillRequirementsList(rawRequired);
   const rawPrefList = normalizeSkillsList(rawPreferred);
 
-  const requiredLowerSet = new Set(requiredSkills.map((s) => s.toLowerCase()));
+  const requiredLowerSet = new Set(requiredSkills.map((s) => s.name.toLowerCase()));
   const preferredSkills = rawPrefList.filter((s) => !requiredLowerSet.has(s.toLowerCase()));
 
   return { requiredSkills, preferredSkills };

@@ -1,4 +1,5 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { AssessmentRoundType } from '../job/job.model.js';
 
 export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
 export type FunnelConfigStatus = 'draft' | 'active' | 'completed' | 'paused';
@@ -8,6 +9,7 @@ export interface IFunnelStage {
   stageId: string;
   stageName: string;
   stageType: FunnelStageType;
+  assessmentType?: AssessmentRoundType;
   order: number;
   expectedAttendanceRate: number; // > 0 and <= 1
   expectedPassRate: number;       // > 0 and <= 1
@@ -42,6 +44,11 @@ const FunnelStageSchema = new Schema<IFunnelStage>(
       type: String,
       enum: ['resume_match', 'assessment', 'ai_interview', 'manual_review', 'human_interview'],
       required: true,
+    },
+    assessmentType: {
+      type: String,
+      enum: ['general', 'coding'],
+      default: undefined,
     },
     order: { type: Number, required: true },
     expectedAttendanceRate: { type: Number, required: true, min: 0.01, max: 1.0 },

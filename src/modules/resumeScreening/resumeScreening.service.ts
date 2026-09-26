@@ -6,6 +6,7 @@ import { UserModel } from '../user/user.model.js';
 import { CandidateProfileModel } from '../job/candidateProfile.model.js';
 import { UserProfileModel } from '../profile/profile.model.js';
 import { CandidateDataResolver } from '../profile/candidateDataResolver.js';
+import { candidateJobMatchingService } from '../matching/candidateJobMatching.service.js';
 import { embeddingService } from '../embedding/embedding.service.js';
 import { AtsService } from '../ai/services/ats.service.js';
 import { AppError } from '../../utils/appError.js';
@@ -76,74 +77,61 @@ export class ResumeScreeningService {
       candidateProfile,
     });
 
-    const jobSkills = Array.isArray(job.skills) ? job.skills : [];
-    const candidateSkills = resolved.skills;
-
-    // 3. Compute Skills Match using EmbeddingService
-    const skillAnalysis = embeddingService.calculateSkillsMatch(jobSkills, candidateSkills);
-    const skillsMatchScore = skillAnalysis.score;
-    const matchedSkills = skillAnalysis.matched;
-    const missingSkills = skillAnalysis.missing;
-
-    // 4. Compute Experience Match Score
-    const candidateYears = resolved.isFresher
-      ? 0
-      : (resolved.totalExperienceYears > 0 ? resolved.totalExperienceYears : (candidateProfile?.yearsOfExperience || 0));
-    const minExp = typeof job.minimumExperience === 'number' ? job.minimumExperience : 0;
-    const maxExp = typeof job.maximumExperience === 'number' ? job.maximumExperience : undefined;
-    
-    let experienceMatchScore = 70;
-    if (minExp === 0 && candidateYears >= 0) {
-      experienceMatchScore = 95;
-    } else if (candidateYears >= minExp) {
-      if (maxExp !== undefined && candidateYears > maxExp + 5) {
-        experienceMatchScore = 80; // Slightly over-qualified
-      } else {
-        experienceMatchScore = 95;
+    // 3. Match candidate against job using the canonical Phase 3 matching engine
+    const matchResult = candidateJobMatchingService.matchCandidateToJob(
+      resolved,
+      job,
+      {
+        candidateEmbedding: candidateProfile?.embedding,
+        jobEmbedding: job.embedding,
       }
-    } else {
-      // Below min experience
-      const diff = minExp - candidateYears;
-      if (diff <= 1) experienceMatchScore = 75;
-      else if (diff <= 2) experienceMatchScore = 60;
-      else experienceMatchScore = Math.max(20, 50 - (diff - 2) * 10);
-    }
-
-    // 5. Compute Vector Cosine Similarity (if embeddings exist)
-    let vectorSimScore = 50;
-    if (candidateProfile?.embedding && job.embedding && job.embedding.length > 0) {
-      const sim = embeddingService.cosineSimilarity(candidateProfile.embedding, job.embedding);
-      vectorSimScore = Math.round(Math.max(0, Math.min(1, sim)) * 100);
-    } else {
-      vectorSimScore = skillsMatchScore;
-    }
-
-    // 6. Overall Weighted Score (50% Skills + 30% Vector + 20% Experience)
-    const overallScore = Math.max(
-      1,
-      Math.min(100, Math.round(skillsMatchScore * 0.5 + vectorSimScore * 0.3 + experienceMatchScore * 0.2))
     );
 
-    // 7. Extract strengths, weaknesses, and recommendation
+    const overallScore = matchResult.overallScore;
+    const skillsMatchScore = matchResult.breakdown.requiredSkillsScore;
+    const experienceMatchScore = matchResult.breakdown.experienceScore;
+    const matchedSkills = matchResult.requiredSkills.matched;
+    const missingSkills = matchResult.requiredSkills.missing;
+
+    // 4. Extract strengths, weaknesses, and recommendation from canonical match result
     const strengths: string[] = [];
     const weaknesses: string[] = [];
 
     if (matchedSkills.length > 0) {
       strengths.push(`Matches ${matchedSkills.length} key required skill${matchedSkills.length > 1 ? 's' : ''}: ${matchedSkills.slice(0, 4).join(', ')}`);
     }
-    if (candidateYears >= minExp && minExp > 0) {
-      strengths.push(`Meets experience requirement (${candidateYears} yrs vs ${minExp} yrs required)`);
+    if (matchResult.preferredSkills.matched.length > 0) {
+      strengths.push(`Matches ${matchResult.preferredSkills.matched.length} preferred skill${matchResult.preferredSkills.matched.length > 1 ? 's' : ''}: ${matchResult.preferredSkills.matched.slice(0, 3).join(', ')}`);
     }
-    if (vectorSimScore >= 75) {
+    if (matchResult.experience.status === 'within_range' || matchResult.experience.status === 'above_range' || matchResult.experience.status === 'no_requirement') {
+      const expText = matchResult.experience.minimumRequired !== undefined
+        ? ` (${matchResult.experience.candidateYears} yrs vs ${matchResult.experience.minimumRequired} yrs required)`
+        : ` (${matchResult.experience.candidateYears} yrs)`;
+      strengths.push(`Meets experience requirement${expText}`);
+    }
+    if (matchResult.breakdown.semanticScore >= 75) {
       strengths.push('High semantic relevance to job description responsibilities');
+    }
+    if (matchResult.breakdown.roleRelevanceScore >= 80) {
+      strengths.push('Strong role and title alignment');
+    }
+    if (matchResult.education.status === 'meets_requirement') {
+      strengths.push('Meets education qualification requirements');
     }
 
     if (missingSkills.length > 0) {
       weaknesses.push(`Missing core skills: ${missingSkills.slice(0, 4).join(', ')}`);
     }
-    if (minExp > 0 && candidateYears < minExp) {
-      weaknesses.push(`Below target minimum experience (${candidateYears} yrs vs ${minExp} yrs required)`);
+    if (matchResult.experience.status === 'below_minimum') {
+      weaknesses.push(`Below target minimum experience (${matchResult.experience.candidateYears} yrs vs ${matchResult.experience.minimumRequired} yrs required)`);
     }
+    if (matchResult.education.status === 'below_requirement') {
+      weaknesses.push('Education level is below target requirement');
+    }
+    if (matchResult.breakdown.semanticScore < 50 && (candidateProfile?.embedding || job.embedding)) {
+      weaknesses.push('Low semantic overlap with core responsibilities');
+    }
+
     if (strengths.length === 0) {
       strengths.push('Candidate submitted a complete application profile for evaluation');
     }
@@ -152,9 +140,9 @@ export class ResumeScreeningService {
     }
 
     let recommendation: 'strong_match' | 'potential_match' | 'not_recommended' = 'potential_match';
-    if (overallScore >= 75) {
+    if (matchResult.recommendation === 'strong_match') {
       recommendation = 'strong_match';
-    } else if (overallScore < 50) {
+    } else if (matchResult.recommendation === 'weak_match') {
       recommendation = 'not_recommended';
     }
 
@@ -169,6 +157,11 @@ export class ResumeScreeningService {
       recommendation,
       evaluatedAt: new Date(),
       isAiEvaluated: true,
+      breakdown: matchResult.breakdown,
+      matchedPreferredSkills: matchResult.preferredSkills.matched,
+      missingRequiredSkills: matchResult.requiredSkills.missing,
+      explanations: matchResult.explanations,
+      canonicalMatch: matchResult,
     };
 
     // 8. Update application state

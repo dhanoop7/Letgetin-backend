@@ -10,6 +10,8 @@ export interface IResumeDocument extends Document {
   isPublic: boolean;
   starred?: boolean;
   isActive?: boolean;
+  isVerified?: boolean;
+  verifiedAt?: Date;
   shareToken?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -26,6 +28,8 @@ const ResumeSchema = new Schema<IResumeDocument>(
     isPublic: { type: Boolean, default: false },
     starred: { type: Boolean, default: false },
     isActive: { type: Boolean, default: false },
+    isVerified: { type: Boolean, default: false },
+    verifiedAt: { type: Date, default: null },
     shareToken: { type: String, default: null, sparse: true },
   },
   {

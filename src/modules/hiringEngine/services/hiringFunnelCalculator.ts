@@ -5,6 +5,7 @@ export interface StageCalculationInput {
   stageId: string;
   stageName: string;
   stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
+  assessmentType?: 'general' | 'coding';
   order: number;
   expectedAttendanceRate: number; // 0 < rate <= 1
   expectedPassRate: number;       // 0 < rate <= 1
@@ -112,6 +113,7 @@ export class HiringFunnelCalculator {
         stageId: stage.stageId.trim(),
         stageName: stage.stageName?.trim() || stage.stageId.trim(),
         stageType: stage.stageType,
+        assessmentType: stage.assessmentType,
         order: i + 1, // Normalized 1-based order
         expectedAttendanceRate: stage.expectedAttendanceRate,
         expectedPassRate: stage.expectedPassRate,

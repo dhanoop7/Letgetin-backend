@@ -28,6 +28,18 @@ export interface IResumeEvaluation {
   recommendation: 'strong_match' | 'potential_match' | 'not_recommended';
   evaluatedAt: Date;
   isAiEvaluated: boolean;
+  breakdown?: {
+    requiredSkillsScore: number;
+    preferredSkillsScore: number;
+    experienceScore: number;
+    educationScore: number;
+    semanticScore: number;
+    roleRelevanceScore: number;
+  };
+  matchedPreferredSkills?: string[];
+  missingRequiredSkills?: string[];
+  explanations?: string[];
+  canonicalMatch?: any;
 }
 
 export interface IApplicationDocument extends Document {
@@ -117,6 +129,11 @@ const ApplicationSchema = new Schema<IApplicationDocument>(
       },
       evaluatedAt: { type: Date },
       isAiEvaluated: { type: Boolean, default: false },
+      breakdown: { type: Schema.Types.Mixed },
+      matchedPreferredSkills: { type: [String], default: [] },
+      missingRequiredSkills: { type: [String], default: [] },
+      explanations: { type: [String], default: [] },
+      canonicalMatch: { type: Schema.Types.Mixed },
     },
     // --- Hiring Engine Extensions ---
     poolType: {

@@ -44,8 +44,32 @@ export interface IJobEducationRequirement {
   fields?: string[];
 }
 
+export type SkillProficiency = 'beginner' | 'intermediate' | 'advanced' | 'expert';
+
+export interface IJobSkillRequirement {
+  name: string;
+  proficiency: SkillProficiency;
+}
+
+export class SkillRequirementArray extends Array<IJobSkillRequirement> {
+  includes(searchElement: string | IJobSkillRequirement | any, fromIndex?: number): boolean {
+    if (typeof searchElement === 'string') {
+      const lower = searchElement.toLowerCase().trim();
+      return this.some((s) => {
+        const name = typeof s === 'string' ? (s as string) : s?.name;
+        return typeof name === 'string' && name.toLowerCase().trim() === lower;
+      });
+    }
+    if (searchElement && typeof searchElement === 'object' && 'name' in searchElement) {
+      const lower = (searchElement as { name: string }).name.toLowerCase().trim();
+      return this.some((s) => (typeof s === 'string' ? (s as string).toLowerCase().trim() === lower : s.name.toLowerCase().trim() === lower));
+    }
+    return super.includes(searchElement, fromIndex);
+  }
+}
+
 export interface IJobRequirements {
-  requiredSkills: string[];
+  requiredSkills: SkillRequirementArray;
   preferredSkills: string[];
   minimumExperienceYears?: number;
   maximumExperienceYears?: number;
@@ -74,6 +98,23 @@ export function formatEducationRequirements(edu?: IJobEducationRequirement): str
     }
   }
   return base;
+}
+
+export type AssessmentRoundType = 'general' | 'coding';
+export type GeneralAssessmentQuestionType = 'mcq' | 'short_answer' | 'scenario';
+
+export interface IAssessmentRoundConfig {
+  id: string;
+  type: AssessmentRoundType;
+  order: number;
+  name: string;
+  enabled: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface IJobAssessmentConfig {
+  enabled: boolean;
+  rounds: IAssessmentRoundConfig[];
 }
 
 export interface IJobDocument extends Document {
@@ -134,6 +175,7 @@ export interface IJobDocument extends Document {
     humanInterviewTypes?: string[];
     roundOrder?: string[];
   };
+  assessment?: IJobAssessmentConfig;
   recruiterStage?: RecruiterJobStage;
   completedAt?: Date;
   creditsCost?: number;
@@ -160,14 +202,38 @@ const JobEducationSchema = new Schema(
 
 const JobRequirementsSchema = new Schema(
   {
-    requiredSkills: { type: [String], default: [], index: true },
-    preferredSkills: { type: [String], default: [] },
+    requiredSkills: { type: [Schema.Types.Mixed], default: [] },
+    preferredSkills: { type: [Schema.Types.Mixed], default: [] },
     minimumExperienceYears: { type: Number, min: 0 },
     maximumExperienceYears: { type: Number, min: 0 },
     education: {
       type: JobEducationSchema,
       default: () => ({ minimumLevel: 'none', fields: [] }),
     },
+  },
+  { _id: false }
+);
+
+const AssessmentRoundSchema = new Schema<IAssessmentRoundConfig>(
+  {
+    id: { type: String, required: true, trim: true },
+    type: {
+      type: String,
+      enum: ['general', 'coding'],
+      required: true,
+    },
+    order: { type: Number, required: true, min: 1 },
+    name: { type: String, required: true, trim: true },
+    enabled: { type: Boolean, default: true },
+    config: { type: Schema.Types.Mixed, default: undefined },
+  },
+  { _id: false }
+);
+
+const JobAssessmentSchema = new Schema<IJobAssessmentConfig>(
+  {
+    enabled: { type: Boolean, default: false },
+    rounds: { type: [AssessmentRoundSchema], default: [] },
   },
   { _id: false }
 );
@@ -258,6 +324,7 @@ const JobSchema = new Schema<IJobDocument>(
       humanInterviewTypes: { type: [String], default: [] },
       roundOrder: { type: [String], default: undefined },
     },
+    assessment: { type: JobAssessmentSchema, default: () => ({ enabled: false, rounds: [] }) },
     recruiterStage: {
       type: String,
       enum: ['open', 'shortlisting', 'interview', 'review', 'completed'],

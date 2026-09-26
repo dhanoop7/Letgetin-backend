@@ -2,6 +2,11 @@ import { Types } from 'mongoose';
 import { ApplicationModel, IApplicationDocument } from '../../application/application.model.js';
 import { JobModel } from '../../job/job.model.js';
 import { CandidateProfileModel } from '../../job/candidateProfile.model.js';
+import { UserModel } from '../../user/user.model.js';
+import { UserProfileModel } from '../../profile/profile.model.js';
+import { ResumeModel } from '../../resume/resume.model.js';
+import { CandidateDataResolver } from '../../profile/candidateDataResolver.js';
+import { candidateJobMatchingService } from '../../matching/candidateJobMatching.service.js';
 import { embeddingService } from '../../embedding/embedding.service.js';
 import { CandidateStageHistoryModel } from '../candidateStageHistory.model.js';
 import { HiringFunnelConfigModel } from '../hiringFunnelConfig.model.js';
@@ -17,8 +22,7 @@ export interface PoolPartitionResult {
 
 export class HiringPoolManager {
   /**
-   * Calculates or retrieves composite rank score using the existing matching engine:
-   * 70% vector similarity + 30% direct skills overlap.
+   * Calculates or retrieves composite rank score using the canonical matching engine.
    */
   public static async computeOrGetCompositeScore(
     application: IApplicationDocument,
@@ -31,27 +35,49 @@ export class HiringPoolManager {
     }
 
     try {
-      const candidateProfile = await CandidateProfileModel.findOne({ userId: application.userId }).lean();
-      const candidateSkills = candidateProfile?.skills || [];
-
-      // 1. Direct skills match (30% weight)
-      const skillAnalysis = embeddingService.calculateSkillsMatch(jobSkills, candidateSkills);
-
-      // 2. Vector similarity (70% weight) if embeddings exist
-      let score = 50; // Neutral baseline
-      if (candidateProfile?.embedding && jobEmbedding && jobEmbedding.length > 0) {
-        const vectorSim = embeddingService.cosineSimilarity(candidateProfile.embedding, jobEmbedding);
-        score = Math.round(Math.round(vectorSim * 100) * 0.7 + skillAnalysis.score * 0.3);
-      } else if (candidateSkills.length > 0) {
-        score = Math.min(
-          98,
-          Math.max(50, 45 + Math.round((skillAnalysis.matched.length / Math.max(1, jobSkills.length || 1)) * 50))
+      if (application.jobId) {
+        const canonicalResult = await candidateJobMatchingService.matchCandidateIdToJobId(
+          String(application.userId),
+          String(application.jobId)
         );
-      } else {
-        score = skillAnalysis.score > 0 ? skillAnalysis.score : 50;
+        if (canonicalResult) {
+          return canonicalResult.overallScore;
+        }
       }
 
-      return Math.max(1, Math.min(100, score));
+      // Fallback: If jobId is not provided or job not found by ID, resolve candidate and evaluate against synthetic job
+      const [candidateProfile, user, userProfile, resume] = await Promise.all([
+        CandidateProfileModel.findOne({ userId: application.userId }).lean(),
+        UserModel.findById(application.userId).select('fullName email').lean(),
+        UserProfileModel.findOne({ userId: application.userId }).lean(),
+        (application as any).resumeId
+          ? ResumeModel.findById((application as any).resumeId).lean()
+          : ResumeModel.findOne({ userId: application.userId }).sort({ updatedAt: -1 }).lean(),
+      ]);
+
+      const resolved = CandidateDataResolver.resolve({
+        userId: String(application.userId),
+        user,
+        userProfile,
+        resume,
+        candidateProfile,
+      });
+
+      const syntheticJob = {
+        skills: jobSkills,
+        embedding: jobEmbedding,
+      };
+
+      const matchResult = candidateJobMatchingService.matchCandidateToJob(
+        resolved,
+        syntheticJob,
+        {
+          candidateEmbedding: candidateProfile?.embedding,
+          jobEmbedding,
+        }
+      );
+
+      return matchResult.overallScore;
     } catch {
       return application.matchScore || 50;
     }

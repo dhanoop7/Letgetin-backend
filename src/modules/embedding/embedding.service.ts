@@ -61,8 +61,8 @@ export class EmbeddingService {
     location?: { city?: string; state?: string; country?: string; remote?: boolean };
     educationRequirements?: string;
     structuredRequirements?: {
-      requiredSkills?: string[];
-      preferredSkills?: string[];
+      requiredSkills?: any[];
+      preferredSkills?: any[];
       minimumExperienceYears?: number;
       maximumExperienceYears?: number;
       education?: {
@@ -102,17 +102,50 @@ export class EmbeddingService {
       }
     }
 
-    // Skills
-    const reqSkills = job.structuredRequirements?.requiredSkills?.length
+    // Skills with proficiency for required, skill name only for preferred
+    const formatSkillForEmbedding = (skill: unknown): string => {
+      if (!skill) return '';
+      if (typeof skill === 'string') {
+        return `- ${skill.trim()}`;
+      }
+      if (typeof skill === 'object') {
+        const s = skill as { name?: string; proficiency?: string };
+        const name = s.name?.trim() || '';
+        if (!name) return '';
+        const prof = s.proficiency
+          ? s.proficiency.charAt(0).toUpperCase() + s.proficiency.slice(1).toLowerCase()
+          : 'Intermediate';
+        return `- ${name} (${prof})`;
+      }
+      return '';
+    };
+
+    const formatPreferredSkillForEmbedding = (skill: unknown): string => {
+      if (!skill) return '';
+      if (typeof skill === 'string') {
+        const trimmed = skill.trim();
+        return trimmed ? `- ${trimmed}` : '';
+      }
+      if (typeof skill === 'object') {
+        const s = skill as { name?: string };
+        const name = s.name?.trim() || '';
+        return name ? `- ${name}` : '';
+      }
+      return '';
+    };
+
+    const reqSkills: any[] = job.structuredRequirements?.requiredSkills?.length
       ? job.structuredRequirements.requiredSkills
       : (job.skills || []);
-    const prefSkills = job.structuredRequirements?.preferredSkills || [];
+    const prefSkills: any[] = job.structuredRequirements?.preferredSkills || [];
 
     if (reqSkills.length > 0) {
-      parts.push(`Required Skills:\n${reqSkills.join(', ')}`);
+      const formatted = reqSkills.map(formatSkillForEmbedding).filter(Boolean).join('\n');
+      if (formatted) parts.push(`Required Skills:\n${formatted}`);
     }
     if (prefSkills.length > 0) {
-      parts.push(`Preferred Skills:\n${prefSkills.join(', ')}`);
+      const formatted = prefSkills.map(formatPreferredSkillForEmbedding).filter(Boolean).join('\n');
+      if (formatted) parts.push(`Preferred Skills:\n${formatted}`);
     }
 
     // Education

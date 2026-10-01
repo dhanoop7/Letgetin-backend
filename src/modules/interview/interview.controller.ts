@@ -1,19 +1,25 @@
 import { Request, Response } from 'express';
 import { InterviewService } from './interview.service.js';
+import { SignalingService } from './signaling.service.js';
 import { InterviewStage } from './interview.model.js';
 
 export class InterviewController {
   public static async listInterviews(req: Request, res: Response): Promise<void> {
     const userId = req.user!.userId;
+    const email = req.user?.email;
     const { stage, date, search, limit, skip } = req.query;
 
-    const result = await InterviewService.listInterviews(userId, {
-      stage: stage as InterviewStage | undefined,
-      date: date as string | undefined,
-      search: search as string | undefined,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      skip: skip ? parseInt(skip as string, 10) : undefined,
-    });
+    const result = await InterviewService.listInterviews(
+      userId,
+      {
+        stage: stage as InterviewStage | undefined,
+        date: date as string | undefined,
+        search: search as string | undefined,
+        limit: limit ? parseInt(limit as string, 10) : undefined,
+        skip: skip ? parseInt(skip as string, 10) : undefined,
+      },
+      email
+    );
 
     res.status(200).json({
       success: true,
@@ -120,4 +126,100 @@ export class InterviewController {
       data: scorecard,
     });
   }
+
+  public static async validateJoinAccess(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const email = req.user?.email;
+    const id = req.params.id as string;
+
+    const access = await InterviewService.validateJoinAccess(id, userId, email);
+
+    res.status(200).json({
+      success: true,
+      data: access,
+    });
+  }
+
+  public static async streamSignaling(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.userId || `user_${Date.now()}`;
+    const id = req.params.id as string;
+    const role = (req.query.role as 'candidate' | 'interviewer') || 'candidate';
+
+    SignalingService.subscribe(id, userId, role, res);
+  }
+
+  public static async postSignalingMessage(req: Request, res: Response): Promise<void> {
+    const id = req.params.id as string;
+    const { clientId, payload } = req.body;
+
+    const success = SignalingService.broadcastMessage(id, clientId, payload);
+
+    res.status(200).json({
+      success,
+    });
+  }
+
+  /**
+   * POST /api/interviews/buddy/generate
+   * Generate tailored questions for Interview Buddy using Gemini
+   */
+  public static async generateBuddyQuestions(req: Request, res: Response): Promise<void> {
+    try {
+      const { mode, jobDescription, customConfig } = req.body;
+      const userId = req.user?.userId;
+
+      const result = await InterviewService.generateBuddyQuestions({
+        mode,
+        jobDescription: String(jobDescription || '').trim(),
+        customConfig,
+        userId,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'AI Interview questions generated successfully',
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[InterviewController.generateBuddyQuestions] Error:', err?.message || err);
+      const statusCode = err?.statusCode || 500;
+      res.status(statusCode).json({
+        success: false,
+        message: err?.message || 'Unable to generate AI interview questions. Please try again.',
+      });
+    }
+  }
+
+  /**
+   * POST /api/interviews/buddy/evaluate
+   * Evaluate a candidate's answer for Interview Buddy using Gemini
+   */
+  public static async evaluateBuddyAnswer(req: Request, res: Response): Promise<void> {
+    try {
+      const { question, answer, category, mode, expectedAnswer, jobDescription } = req.body;
+
+      const result = await InterviewService.evaluateBuddyAnswer({
+        question,
+        answer,
+        category,
+        mode,
+        expectedAnswer,
+        jobDescription,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Interview answer evaluated by AI',
+        data: result,
+      });
+    } catch (err: any) {
+      console.error('[InterviewController.evaluateBuddyAnswer] Error:', err?.message || err);
+      const statusCode = err?.statusCode || 500;
+      res.status(statusCode).json({
+        success: false,
+        message: err?.message || 'Unable to evaluate your response with AI. Please try again.',
+      });
+    }
+  }
 }
+

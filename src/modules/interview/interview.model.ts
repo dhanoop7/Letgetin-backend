@@ -56,8 +56,11 @@ export interface IInterviewDocument extends Document {
   type: InterviewType;
   date: string; // YYYY-MM-DD
   time: string; // e.g. "10:30 AM"
-  durationMinutes: number;
+  durationMinutes?: number;
   platform: 'LetGetIn Room' | 'Google Meet' | 'Zoom' | 'Microsoft Teams' | 'On-Site';
+  meetingProvider?: 'google_meet' | 'letgetin_room' | 'zoom' | 'teams' | 'onsite';
+  meetingUrl?: string;
+  meetingId?: string;
   meetingLink: string;
   roomCode?: string;
   interviewers: IInterviewer[];
@@ -65,6 +68,8 @@ export interface IInterviewDocument extends Document {
   score?: number; // 1-5
   feedbackNotes?: string;
   aiScorecard?: IAiScorecard;
+  transcript?: { id: string; speaker: string; speakerName: string; text: string; time: string }[];
+  completedAt?: Date;
   linkedTaskId?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -101,6 +106,13 @@ const InterviewSchema = new Schema<IInterviewDocument>(
       enum: ['LetGetIn Room', 'Google Meet', 'Zoom', 'Microsoft Teams', 'On-Site'],
       default: 'LetGetIn Room',
     },
+    meetingProvider: {
+      type: String,
+      enum: ['google_meet', 'letgetin_room', 'zoom', 'teams', 'onsite'],
+      default: 'letgetin_room',
+    },
+    meetingUrl: { type: String, default: '' },
+    meetingId: { type: String, default: '' },
     meetingLink: { type: String, default: '' },
     roomCode: { type: String, default: '' },
     interviewers: [
@@ -137,6 +149,16 @@ const InterviewSchema = new Schema<IInterviewDocument>(
       recommendation: { type: String, enum: ['Strong Hire', 'Hire', 'Hold', 'Reject'] },
       evaluationDate: { type: String },
     },
+    transcript: [
+      {
+        id: { type: String },
+        speaker: { type: String },
+        speakerName: { type: String },
+        text: { type: String },
+        time: { type: String },
+      },
+    ],
+    completedAt: { type: Date },
     linkedTaskId: { type: Schema.Types.ObjectId, ref: 'Task' },
   },
   {

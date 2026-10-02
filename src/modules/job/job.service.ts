@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobRequirements, IJobSkillRequirement, formatEducationRequirements, IJobAssessmentConfig } from './job.model.js';
+import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobRequirements, IJobSkillRequirement, formatEducationRequirements, IJobAssessmentConfig, AssessmentRoundType, ILinguisticTestConfig, IPsychometricGeniusTestConfig } from './job.model.js';
 import { normalizeJobRequirements } from './jobRequirements.utils.js';
 import { normalizeAssessmentConfiguration, DEFAULT_ASSESSMENT_NAMES } from './assessmentConfig.utils.js';
 import { CandidateProfileModel, ICandidateProfileDocument } from './candidateProfile.model.js';
@@ -614,6 +614,8 @@ export class JobService {
       ...data.pipelineOptions,
       listAsJob: data.listAsJob ?? data.pipelineOptions?.listAsJob,
       featuredJob: data.featuredJob ?? data.pipelineOptions?.featuredJob,
+      listInLandingPage: data.listInLandingPage ?? data.pipelineOptions?.listInLandingPage,
+      listInRecentlyPosted: data.listInRecentlyPosted ?? data.pipelineOptions?.listInRecentlyPosted,
     };
     if (normalizedAssessment && normalizedAssessment.enabled && normalizedAssessment.rounds.length > 0) {
       pipelineSelection.assessment = true;
@@ -700,6 +702,10 @@ export class JobService {
       pipelineOptions: sanitizedPipeline,
       listAsJob: sanitizedPipeline.listAsJob,
       featuredJob: sanitizedPipeline.featuredJob,
+      listInLandingPage: sanitizedPipeline.listInLandingPage,
+      listInRecentlyPosted: sanitizedPipeline.listInRecentlyPosted,
+      linguisticTest: data.linguisticTest,
+      psychometricGeniusTest: data.psychometricGeniusTest,
       assessment: normalizedAssessment,
       recruiterStage: 'open',
       creditsCost,
@@ -739,164 +745,32 @@ export class JobService {
         type FunnelStageItem = {
           stageId: string;
           stageName: string;
-          stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
-          assessmentType?: 'general' | 'coding';
+          stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview' | 'custom';
+          assessmentType?: AssessmentRoundType | string;
           order: number;
           expectedAttendanceRate: number;
           expectedPassRate: number;
           deadlineHours: number;
           autoAdvanceScoreThreshold?: number;
           autoRefillEnabled?: boolean;
+          schedule?: {
+            date?: string;
+            startTime?: string;
+            endTime?: string;
+            durationHours?: number | string;
+            durationFormatted?: string;
+          };
+          durationMinutes?: number;
+          passingScore?: number;
+          questionCount?: number;
+          interviewMode?: string;
+          modalities?: string[];
+          config?: Record<string, unknown>;
         };
 
         const stages: FunnelStageItem[] = [];
-
-        const buildStageFromKey = (key: string, order: number): FunnelStageItem | null => {
-          const k = String(key).toLowerCase().trim().replace(/[-\s]/g, '_');
-          if (k === 'general' || k === 'stage_assessment_general') {
-            return {
-              stageId: 'stage_assessment_general',
-              stageName: 'General Assessment',
-              stageType: 'assessment',
-              assessmentType: 'general',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 75,
-              autoRefillEnabled: true,
-            };
-          }
-          if (k === 'coding' || k === 'stage_assessment_coding') {
-            return {
-              stageId: 'stage_assessment_coding',
-              stageName: 'Coding Assessment',
-              stageType: 'assessment',
-              assessmentType: 'coding',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 75,
-              autoRefillEnabled: true,
-            };
-          }
-          // Legacy assessment type keys mapped to General Assessment
-          if (
-            k === 'mcq' ||
-            k === 'stage_assessment_mcq' ||
-            k === 'short_answer' ||
-            k === 'stage_assessment_short_answer' ||
-            k === 'scenario' ||
-            k === 'stage_assessment_scenario'
-          ) {
-            return {
-              stageId: 'stage_assessment_general',
-              stageName: 'General Assessment',
-              stageType: 'assessment',
-              assessmentType: 'general',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 75,
-              autoRefillEnabled: true,
-            };
-          }
-          if (k.includes('assess') || k === 'technical_assessment') {
-            return {
-              stageId: 'stage_assessment',
-              stageName: 'Technical Assessment',
-              stageType: 'assessment',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 75,
-              autoRefillEnabled: true,
-            };
-          }
-          if (k.includes('ai_interview') || k === 'aiinterview' || k === 'video_interview') {
-            return {
-              stageId: 'stage_ai_interview',
-              stageName: 'AI Comprehensive Interview',
-              stageType: 'ai_interview',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.5,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 80,
-              autoRefillEnabled: true,
-            };
-          }
-          if (k.includes('human') || k.includes('manual') || k === 'live_interview' || k === 'hiring_manager') {
-            return {
-              stageId: 'stage_human_interview',
-              stageName: 'Human Interview',
-              stageType: 'human_interview',
-              order,
-              expectedAttendanceRate: 0.9,
-              expectedPassRate: 0.5,
-              deadlineHours: 72,
-              autoAdvanceScoreThreshold: 70,
-              autoRefillEnabled: true,
-            };
-          }
-          if (k.includes('resume') || k.includes('screen') || k.includes('ats')) {
-            return {
-              stageId: 'stage_resume_screen',
-              stageName: 'Resume Screening',
-              stageType: 'resume_match',
-              order,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 24,
-              autoAdvanceScoreThreshold: 70,
-              autoRefillEnabled: true,
-            };
-          }
-          return {
-            stageId: `stage_${k}`,
-            stageName: key,
-            stageType: 'manual_review',
-            order,
-            expectedAttendanceRate: 1.0,
-            expectedPassRate: 0.6,
-            deadlineHours: 48,
-            autoAdvanceScoreThreshold: 70,
-            autoRefillEnabled: true,
-          };
-        };
-
-        const buildAssessmentStages = (): FunnelStageItem[] => {
-          if (!normalizedAssessment?.enabled || normalizedAssessment.rounds.length === 0) {
-            return [{
-              stageId: 'stage_assessment',
-              stageName: 'Technical Assessment',
-              stageType: 'assessment',
-              order: currentOrder++,
-              expectedAttendanceRate: 1.0,
-              expectedPassRate: 0.6,
-              deadlineHours: 48,
-              autoAdvanceScoreThreshold: 75,
-              autoRefillEnabled: true,
-            }];
-          }
-          return normalizedAssessment.rounds.map((round) => ({
-            stageId: `stage_assessment_${round.type}`,
-            stageName: round.name || DEFAULT_ASSESSMENT_NAMES[round.type] || 'Assessment',
-            stageType: 'assessment' as const,
-            assessmentType: round.type,
-            order: currentOrder++,
-            expectedAttendanceRate: 1.0,
-            expectedPassRate: 0.6,
-            deadlineHours: 48,
-            autoAdvanceScoreThreshold: 75,
-            autoRefillEnabled: true,
-          }));
-        };
-
         let currentOrder = 1;
+
         if (Array.isArray(data.stages) && data.stages.length > 0) {
           for (const st of data.stages) {
             stages.push({
@@ -904,41 +778,190 @@ export class JobService {
               order: currentOrder++,
             });
           }
-        } else if (Array.isArray(data.rounds) && data.rounds.length > 0) {
-          for (const round of data.rounds) {
-            const item = buildStageFromKey(round, currentOrder++);
-            if (item) stages.push(item);
-          }
-        } else if (Array.isArray(sanitizedPipeline?.roundOrder) && sanitizedPipeline.roundOrder.length > 0) {
-          for (const round of sanitizedPipeline.roundOrder) {
-            const k = String(round).toLowerCase().trim().replace(/[-\s]/g, '_');
-            if (k.includes('assess') && normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) {
-              for (const ast of buildAssessmentStages()) {
-                stages.push(ast);
-              }
-            } else {
-              const item = buildStageFromKey(round, currentOrder++);
-              if (item) stages.push(item);
-            }
-          }
         } else {
-          if (sanitizedPipeline?.resumeMatch && !sanitizedPipeline?.assessment && !sanitizedPipeline?.aiInterview && !sanitizedPipeline?.humanInterview) {
-            stages.push(buildStageFromKey('resume_match', currentOrder++)!);
+          // 1. Resume Shortlisting & Verification Stage (Qualification boundary)
+          if (sanitizedPipeline?.resumeMatch || job.checkResumeVerification || data.checkResumeVerification) {
+            stages.push({
+              stageId: 'stage_resume_match',
+              stageName: (job.checkResumeVerification || data.checkResumeVerification)
+                ? 'Resume Shortlisting & Verification'
+                : 'Resume Shortlisting',
+              stageType: 'resume_match',
+              assessmentType: 'general',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 24,
+              autoAdvanceScoreThreshold: 70,
+              autoRefillEnabled: true,
+            });
           }
-          if (sanitizedPipeline?.assessment) {
-            if (normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) {
-              for (const ast of buildAssessmentStages()) {
-                stages.push(ast);
+
+          // 2. Pre-assessment: Linguistic Test (if enabled)
+          const lingConfig = job.linguisticTest || data.linguisticTest;
+          if (lingConfig?.enabled) {
+            stages.push({
+              stageId: 'stage_linguistic_test',
+              stageName: 'Linguistic Test (Optional)',
+              stageType: 'assessment',
+              assessmentType: 'linguistic',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.7,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 60,
+              autoRefillEnabled: true,
+              config: lingConfig as any,
+            });
+          }
+
+          // 3. Pre-assessment: Psychometric & Genius Test (only if explicitly selected/enabled by recruiter)
+          const psychConfig = job.psychometricGeniusTest || data.psychometricGeniusTest;
+          const isPsychometricEnabled = psychConfig?.psychometricEnabled === true;
+          const isGeniusEnabled = psychConfig?.geniusEnabled === true;
+
+          if (isPsychometricEnabled && (psychConfig?.psychometricDuration || psychConfig?.psychometricSchedule?.date)) {
+            stages.push({
+              stageId: 'stage_psychometric_test',
+              stageName: 'Psychometric Test',
+              stageType: 'assessment',
+              assessmentType: 'psychometric',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 65,
+              autoRefillEnabled: true,
+              durationMinutes: psychConfig.psychometricDuration || 45,
+              schedule: psychConfig.psychometricSchedule,
+            });
+          }
+          if (isGeniusEnabled && (psychConfig?.geniusDuration || psychConfig?.geniusSchedule?.date)) {
+            stages.push({
+              stageId: 'stage_genius_test',
+              stageName: 'Genius Test',
+              stageType: 'assessment',
+              assessmentType: 'genius',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.5,
+              deadlineHours: 48,
+              autoAdvanceScoreThreshold: 70,
+              autoRefillEnabled: true,
+              durationMinutes: psychConfig.geniusDuration || 45,
+              schedule: psychConfig.geniusSchedule,
+            });
+          }
+
+          // 4. Candidate Assessment Rounds (Online Test, Assessment, Interview, Domain Specific Test, Custom Rounds)
+          if (normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) {
+            for (const round of normalizedAssessment.rounds) {
+              let stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview' | 'custom' = 'assessment';
+              if (
+                round.type === 'ai_assessment' ||
+                round.type === 'rapid_question' ||
+                round.type === 'screening_interview' ||
+                round.type === 'technical_interview'
+              ) {
+                stageType = 'ai_interview';
+              } else if (round.type === 'video_interview' || round.type === 'custom_interview') {
+                stageType = 'human_interview';
+              } else if (round.type === 'custom_test' || round.type === 'custom_domain') {
+                stageType = 'assessment';
               }
-            } else {
-              stages.push(buildStageFromKey('assessment', currentOrder++)!);
+
+              const passScore = typeof (round.config as any)?.passingScore === 'number'
+                ? (round.config as any).passingScore
+                : 70;
+
+              const durationMins = typeof (round.config as any)?.durationMinutes === 'number'
+                ? (round.config as any).durationMinutes
+                : undefined;
+
+              const roundTiming = (round.config as any)?.schedule || (round.date ? {
+                date: round.date,
+                startTime: round.startTime,
+                endTime: round.endTime,
+                durationHours: round.durationHours,
+              } : undefined);
+
+              stages.push({
+                stageId: round.id || `stage_${round.type}_${currentOrder}`,
+                stageName: round.name || DEFAULT_ASSESSMENT_NAMES[round.type] || 'Assessment Stage',
+                stageType,
+                assessmentType: round.type,
+                order: currentOrder++,
+                expectedAttendanceRate: stageType === 'human_interview' ? 0.9 : 1.0,
+                expectedPassRate: 0.6,
+                deadlineHours: 48,
+                autoAdvanceScoreThreshold: passScore,
+                autoRefillEnabled: true,
+                schedule: roundTiming,
+                durationMinutes: durationMins,
+                passingScore: passScore,
+                questionCount: typeof (round.config as any)?.questionCount === 'number' ? (round.config as any).questionCount : undefined,
+                interviewMode: typeof (round.config as any)?.interviewMode === 'string' ? (round.config as any).interviewMode : undefined,
+                modalities: Array.isArray((round.config as any)?.modalities) ? (round.config as any).modalities : undefined,
+                config: round.config,
+              });
+            }
+          } else {
+            // Fallback for generic assessment/interview options if no specific assessment rounds were built
+            if (sanitizedPipeline?.assessment) {
+              stages.push({
+                stageId: 'stage_assessment',
+                stageName: 'Technical Assessment',
+                stageType: 'assessment',
+                assessmentType: 'general',
+                order: currentOrder++,
+                expectedAttendanceRate: 1.0,
+                expectedPassRate: 0.6,
+                deadlineHours: 48,
+                autoAdvanceScoreThreshold: 75,
+                autoRefillEnabled: true,
+              });
+            }
+            if (sanitizedPipeline?.aiInterview) {
+              stages.push({
+                stageId: 'stage_ai_interview',
+                stageName: 'AI Comprehensive Interview',
+                stageType: 'ai_interview',
+                order: currentOrder++,
+                expectedAttendanceRate: 1.0,
+                expectedPassRate: 0.5,
+                deadlineHours: 48,
+                autoAdvanceScoreThreshold: 80,
+                autoRefillEnabled: true,
+              });
+            }
+            if (sanitizedPipeline?.humanInterview) {
+              stages.push({
+                stageId: 'stage_human_interview',
+                stageName: 'Human Interview',
+                stageType: 'human_interview',
+                order: currentOrder++,
+                expectedAttendanceRate: 0.9,
+                expectedPassRate: 0.5,
+                deadlineHours: 72,
+                autoAdvanceScoreThreshold: 70,
+                autoRefillEnabled: true,
+              });
             }
           }
-          if (sanitizedPipeline?.aiInterview) {
-            stages.push(buildStageFromKey('ai_interview', currentOrder++)!);
-          }
-          if (sanitizedPipeline?.humanInterview) {
-            stages.push(buildStageFromKey('human_interview', currentOrder++)!);
+
+          // Fallback if no stage was created at all
+          if (stages.length === 0) {
+            stages.push({
+              stageId: 'stage_resume_match',
+              stageName: 'Resume Screening',
+              stageType: 'resume_match',
+              order: currentOrder++,
+              expectedAttendanceRate: 1.0,
+              expectedPassRate: 0.6,
+              deadlineHours: 24,
+              autoAdvanceScoreThreshold: 70,
+              autoRefillEnabled: true,
+            });
           }
         }
 
@@ -1118,9 +1141,19 @@ export interface RecruiterJobInput {
     roundOrder?: string[];
     listAsJob?: boolean;
     featuredJob?: boolean;
+    listInLandingPage?: boolean;
+    listInRecentlyPosted?: boolean;
+    checkResumeVerification?: boolean;
+    linguisticTest?: ILinguisticTestConfig;
+    psychometricGeniusTest?: IPsychometricGeniusTestConfig;
   };
+  checkResumeVerification?: boolean;
   listAsJob?: boolean;
   featuredJob?: boolean;
+  listInLandingPage?: boolean;
+  listInRecentlyPosted?: boolean;
+  linguisticTest?: ILinguisticTestConfig;
+  psychometricGeniusTest?: IPsychometricGeniusTestConfig;
 }
 
 export const jobService = new JobService();

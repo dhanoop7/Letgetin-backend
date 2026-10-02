@@ -39,6 +39,22 @@ export class DomainAssessmentController {
   }
 
   /**
+   * AI Question Generation tailored to specific assessment round types (General Aptitude, Technical Test, Rapid Round, etc.)
+   */
+  public async generateRoundQuestions(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const questions = await domainAssessmentService.generateRoundQuestions(req.body);
+      res.status(200).json({
+        success: true,
+        count: questions.length,
+        data: questions,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
    * Create a new Domain Specific Assessment (Draft)
    */
   public async createAssessment(req: Request, res: Response, next: NextFunction): Promise<void> {

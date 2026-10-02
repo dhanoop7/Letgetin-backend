@@ -9,23 +9,65 @@ import {
 export const SUPPORTED_ASSESSMENT_TYPES: readonly AssessmentRoundType[] = [
   'general',
   'coding',
+  'custom_test',
+  'custom_interview',
+  'custom_domain',
+  'general_aptitude',
+  'technical_test',
+  'rapid_round',
+  'ai_assessment',
+  'domain',
+  'skills',
+  'technical',
+  'rapid_question',
+  'screening_interview',
+  'technical_interview',
+  'video_interview',
+  'domain_specific',
+  'linguistic',
+  'psychometric',
+  'genius',
 ] as const;
 
 export const DEFAULT_ASSESSMENT_NAMES: Record<AssessmentRoundType, string> = {
   general: 'General Assessment',
   coding: 'Coding Assessment',
+  custom_test: 'Custom Test Round',
+  custom_interview: 'Custom Interview Round',
+  custom_domain: 'Custom Domain Specific Test',
+  general_aptitude: 'General Aptitude',
+  technical_test: 'Technical Test',
+  rapid_round: 'Rapid Round',
+  ai_assessment: 'AI Assessment',
+  domain: 'Domain Assessment',
+  skills: 'Skills Assessment',
+  technical: 'Technical Assessment',
+  rapid_question: 'Rapid Question Round',
+  screening_interview: 'Screening Interview',
+  technical_interview: 'Technical Interview',
+  video_interview: 'Video Interview',
+  domain_specific: 'Domain Specific Test',
+  linguistic: 'Linguistic Test',
+  psychometric: 'Psychometric Test',
+  genius: 'Genius Test',
 };
 
 export const SUPPORTED_GENERAL_QUESTION_TYPES: readonly GeneralAssessmentQuestionType[] = [
   'mcq',
   'short_answer',
   'scenario',
+  'descriptive',
+  'rapid',
+  'rapid_question',
 ] as const;
 
 export const DEFAULT_QUESTION_TYPE_NAMES: Record<GeneralAssessmentQuestionType, string> = {
   mcq: 'Multiple Choice',
   short_answer: 'Short Answer',
   scenario: 'Scenario-Based',
+  descriptive: 'Descriptive',
+  rapid: 'Rapid Question Round',
+  rapid_question: 'Rapid Question Round',
 };
 
 export function isSupportedAssessmentType(val: unknown): val is AssessmentRoundType {
@@ -99,8 +141,8 @@ export function normalizeAssessmentConfiguration(
 
     if (!isSupportedAssessmentType(roundType)) continue;
 
-    // A job cannot have general + general or coding + coding: deduplicate by type
-    if (seenTypes.has(roundType)) {
+    // Prevent duplicates for non-custom round types
+    if (!String(roundType).startsWith('custom_') && seenTypes.has(roundType)) {
       // If this was an additional legacy question type for general, add it to existing general round
       if (roundType === 'general' && legacyQuestionType) {
         const existingGeneral = validRounds.find((r) => r.type === 'general');
@@ -175,12 +217,14 @@ export function normalizeAssessmentConfiguration(
         delete normalizedConfig.mcq;
       }
 
-      if (uniqueTypes.includes('short_answer')) {
+      if (uniqueTypes.includes('short_answer') || uniqueTypes.includes('descriptive')) {
         normalizedConfig.shortAnswer = {
           questionCount:
             typeof config.shortAnswer?.questionCount === 'number' && config.shortAnswer.questionCount >= 1
               ? Math.round(config.shortAnswer.questionCount)
-              : 5,
+              : (typeof (config as any).descriptive?.questionCount === 'number' && (config as any).descriptive.questionCount >= 1
+                  ? Math.round((config as any).descriptive.questionCount)
+                  : 5),
           ...(typeof config.shortAnswer === 'object' && config.shortAnswer !== null ? config.shortAnswer : {}),
         };
       } else {

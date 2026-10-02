@@ -273,6 +273,759 @@ Format strictly as JSON with this exact schema:
   }
 
   /**
+   * AI Question Generation tailored specifically for any assessment round
+   * (e.g. general_aptitude, technical_test, rapid_round, domain, skills, technical, linguistic, psychometric, genius)
+   */
+  public async generateRoundQuestions(input: {
+    roundType: string;
+    roundName?: string;
+    jobTitle?: string;
+    skills?: string[];
+    difficulty?: string;
+    count?: number;
+    focusTopic?: string;
+    section?: 'mcq' | 'descriptive' | 'rapid';
+    questionFormat?: 'mcq' | 'descriptive' | 'rapid' | 'mixed';
+    timeLimitSeconds?: number;
+    experience?: string;
+    jobDescription?: string;
+    jobResponsibilities?: string | string[];
+  }): Promise<Array<{
+    id: string;
+    target: 'ai_online_test' | 'ai_assessment';
+    section?: 'mcq' | 'descriptive' | 'rapid';
+    type: 'mcq' | 'coding' | 'descriptive' | 'rapid';
+    question: string;
+    options?: Array<{ id: string; text: string }>;
+    correctOptionId?: string;
+    points: number;
+    timeLimitSeconds?: number;
+    explanation?: string;
+    sampleAnswer?: string;
+    evaluationRubric?: string;
+  }>> {
+    const roundType = input.roundType || 'general_aptitude';
+    const roundName = input.roundName || roundType;
+    const jobTitle = input.jobTitle || 'Software Engineer';
+    const skills = Array.isArray(input.skills) && input.skills.length > 0 ? input.skills.join(', ') : 'General Problem Solving';
+    const difficulty = input.difficulty || 'medium';
+    const count = Math.min(Math.max(input.count || 10, 2), 60);
+    const format = input.questionFormat || 'mcq';
+
+    const isGeneralAptitude =
+      roundType === 'general_aptitude' ||
+      roundName.toLowerCase().includes('general aptitude') ||
+      roundName.toLowerCase().includes('aptitude') ||
+      roundType.includes('aptitude');
+
+    const BATCH_SIZE = 15;
+    const numBatches = Math.ceil(count / BATCH_SIZE);
+
+    const aptitudeBatchTopics = [
+      'Quantitative Aptitude: Arithmetic, Percentages, Profit & Loss, Work & Time, Ratios & Proportions',
+      'Logical Reasoning: Number Series, Letter Series, Coding-Decoding, Pattern Analogies',
+      'Quantitative Aptitude: Speed Distance & Time, Averages, Probability, Simple & Compound Interest, Permutations',
+      'Logical Reasoning: Syllogisms, Blood Relations, Direction Sense, Seating Arrangements, Deductions',
+    ];
+
+    const generateBatch = async (batchIdx: number, batchCount: number) => {
+      let prompt = '';
+      if (isGeneralAptitude) {
+        const topicFocus = input.focusTopic
+          ? `${input.focusTopic} (focusing on ${aptitudeBatchTopics[batchIdx % aptitudeBatchTopics.length]})`
+          : aptitudeBatchTopics[batchIdx % aptitudeBatchTopics.length];
+
+        if (format === 'rapid' || input.section === 'rapid') {
+          const rapidSeconds = input.timeLimitSeconds || 30;
+          prompt = `You are a Senior Speed Testing & Cognitive Agility Examiner.
+Generate strictly ${batchCount} high-quality, completely NON-TECHNICAL RAPID-FIRE / SPEED QUESTION ROUND assessment questions on: ${topicFocus}.
+Difficulty: ${difficulty}
+
+CRITICAL RULES:
+1. Every question must be pure Quantitative Aptitude or Logical Reasoning designed for fast ${rapidSeconds}-second solving (mental math shortcuts, quick percentages, speed series, rapid analogies, quick syllogisms, estimation).
+2. ABSOLUTELY NO TECHNICAL OR PROGRAMMING CONTENT (NO code, NO databases, NO software engineering).
+3. Questions must be crisp, punchy, and quick to read.
+4. Each question must provide 4 distinct concise options (A, B, C, D) with exactly one logically indisputable correct answer, and "timeLimitSeconds": ${rapidSeconds}.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "type": "rapid",
+      "question": "Punchy, fast-paced speed aptitude question designed for ${rapidSeconds}s",
+      "options": [
+        { "id": "opt_a", "text": "Option A" },
+        { "id": "opt_b", "text": "Option B" },
+        { "id": "opt_c", "text": "Option C" },
+        { "id": "opt_d", "text": "Option D" }
+      ],
+      "correctOptionId": "opt_a",
+      "timeLimitSeconds": ${rapidSeconds},
+      "points": 10,
+      "explanation": "Quick 1-line mathematical or logical shortcut"
+    }
+  ]
+}`;
+        } else if (format === 'descriptive' || input.section === 'descriptive') {
+          prompt = `You are a Senior Aptitude & Cognitive Testing Examiner.
+Generate strictly ${batchCount} high-quality, completely NON-TECHNICAL DESCRIPTIVE analytical problem-solving assessment questions on: ${topicFocus}.
+Difficulty: ${difficulty}
+
+CRITICAL RULES:
+1. Every question must be pure Quantitative Aptitude or Logical Reasoning.
+2. ABSOLUTELY NO TECHNICAL OR PROGRAMMING CONTENT:
+   - DO NOT mention any programming languages (Java, Python, C++, JavaScript, TypeScript, Go, etc.).
+   - DO NOT mention web development, APIs, databases, SQL, frameworks, Git, Linux, microservices, or software engineering.
+   - All questions must be pure math, word problems, business cases, or logical deduction puzzles.
+3. These are DESCRIPTIVE / OPEN-ENDED questions:
+   - Candidates must write out their step-by-step mathematical calculations, algebraic reasoning, or logical deduction proofs.
+   - For every question, you MUST provide:
+     a) "question": The complete scenario or problem statement requiring written derivation.
+     b) "sampleAnswer": A comprehensive step-by-step model solution detailing intermediate steps and final answer.
+     c) "evaluationRubric": Specific grading criteria with point distribution (e.g. "Formulation: 3 pts, Intermediate calculations: 4 pts, Final conclusion: 3 pts").
+     d) "points": 10
+     e) "explanation": The underlying mathematical or logical principle.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "question": "Full comprehensive mathematical scenario or logical deduction puzzle requiring written derivation",
+      "sampleAnswer": "Step-by-step mathematical derivation and final answer",
+      "evaluationRubric": "Specific point-by-point grading criteria",
+      "points": 10,
+      "explanation": "Core theoretical principle or insight"
+    }
+  ]
+}`;
+        } else if (format === 'mixed') {
+          const descCount = Math.max(1, Math.round(batchCount * 0.3));
+          const mcqCount = Math.max(1, batchCount - descCount);
+
+          prompt = `You are a Senior Aptitude & Cognitive Testing Examiner.
+Generate strictly ${batchCount} completely NON-TECHNICAL assessment questions (${mcqCount} Multiple-Choice Questions and ${descCount} Descriptive problem-solving questions) on: ${topicFocus}.
+Difficulty: ${difficulty}
+
+CRITICAL RULES:
+1. Every question must be pure Quantitative Aptitude or Logical Reasoning. No technical or programming topics allowed.
+2. For "mcq" questions: provide 4 distinct options (opt_a, opt_b, opt_c, opt_d) and "correctOptionId".
+3. For "descriptive" questions: provide "sampleAnswer" (step-by-step solution derivation) and "evaluationRubric" (grading criteria).
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "question": "Clear mathematical or logical MCQ problem statement",
+      "options": [
+        { "id": "opt_a", "text": "Option A" },
+        { "id": "opt_b", "text": "Option B" },
+        { "id": "opt_c", "text": "Option C" },
+        { "id": "opt_d", "text": "Option D" }
+      ],
+      "correctOptionId": "opt_b",
+      "points": 10,
+      "explanation": "Clear step-by-step explanation"
+    },
+    {
+      "type": "descriptive",
+      "question": "Analytical word problem or logical proof requiring written step-by-step derivation",
+      "sampleAnswer": "Step-by-step model solution and final answer",
+      "evaluationRubric": "Grading breakdown criteria",
+      "points": 10,
+      "explanation": "Underlying mathematical or logical principle"
+    }
+  ]
+}`;
+        } else {
+          prompt = `You are a Senior Aptitude & Cognitive Testing Examiner.
+Generate strictly ${batchCount} high-quality, completely NON-TECHNICAL multiple-choice assessment questions on: ${topicFocus}.
+Difficulty: ${difficulty}
+
+CRITICAL RULES:
+1. Every question must be pure Quantitative Aptitude or Logical Reasoning.
+2. ABSOLUTELY NO TECHNICAL OR PROGRAMMING CONTENT:
+   - DO NOT mention any programming languages (Java, Python, C++, JavaScript, TypeScript, Go, etc.).
+   - DO NOT mention web development, APIs, databases, SQL, frameworks (React, Node), Git, Linux, microservices, or software engineering.
+   - All questions must be pure math, word problems, or logical deduction.
+3. Each question must provide 4 distinct options (A, B, C, D) with exactly one logically indisputable correct answer, and a clear step-by-step explanation.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "question": "Full clear mathematical or logical problem statement",
+      "options": [
+        { "id": "opt_a", "text": "Option A text" },
+        { "id": "opt_b", "text": "Option B text" },
+        { "id": "opt_c", "text": "Option C text" },
+        { "id": "opt_d", "text": "Option D text" }
+      ],
+      "correctOptionId": "opt_b",
+      "points": 10,
+      "explanation": "Clear step-by-step mathematical or logical explanation"
+    }
+  ]
+}`;
+        }
+      } else {
+        const expText = input.experience?.trim() || `${difficulty} level (e.g. 3-5 years)`;
+        const jdText = input.jobDescription?.trim()
+          ? input.jobDescription.trim()
+          : `Standard enterprise software engineering practices, lifecycle, and architectures for ${jobTitle}.`;
+
+        const respList = Array.isArray(input.jobResponsibilities)
+          ? input.jobResponsibilities.filter(Boolean)
+          : typeof input.jobResponsibilities === 'string' && input.jobResponsibilities.trim()
+          ? input.jobResponsibilities.split('\n').map((s) => s.trim().replace(/^[-*•]\s*/, '')).filter(Boolean)
+          : [];
+        const respFormatted = respList.length > 0
+          ? respList.map((r) => `- ${r}`).join('\n')
+          : `- Design, implement, and maintain scalable systems and services for ${jobTitle}\n- Troubleshoot performance issues, code bugs, and production incidents\n- Deliver high quality, testable code aligned with industry engineering standards`;
+
+        const skillsFormatted = skills || 'Core programming languages, frameworks, databases, and system architecture';
+
+        const roleHierarchyBlueprint = `
+================================================================================
+MANDATORY ROLE HIERARCHY BLUEPRINT (EVALUATION ORDER):
+You MUST formulate every single question strictly adhering to the following 5-tier hierarchy:
+
+1. TARGET JOB TITLE:
+   "${jobTitle}"
+   - Role Domain: Every question must directly mirror the engineering domain, terminology, workflows, and responsibilities expected of a "${jobTitle}".
+
+2. TARGET EXPERIENCE LEVEL & SENIORITY:
+   "${expText}" (Assessment Difficulty: ${difficulty})
+   - EXPERIENCE CALIBRATION DIRECTIVE:
+     * Junior / Entry-Level (0-2 years): Focus on fundamental syntax, core algorithms, data structure traversal, standard library APIs, basic debugging, and clean code principles. Avoid overly complex multi-system distributed tradeoffs.
+     * Mid-Level (3-5 years): Focus on real-world system implementation, design patterns, database indexing & querying, asynchronous flow, REST/gRPC API contracts, error recovery, testing strategies, and practical component tradeoffs.
+     * Senior / Lead / Architect (5+ years): Focus on high-concurrency systems, distributed architectures, horizontal scaling, caching hierarchies, fault tolerance, microservice communication, database partitioning, security vulnerabilities, and deep architectural trade-off evaluations.
+
+3. JOB DESCRIPTION & BUSINESS CONTEXT:
+   """
+   ${jdText}
+   """
+   - Contextualize questions within this specific business domain, technical environment, and operational challenges described in the Job Description.
+
+4. KEY ROLE RESPONSIBILITIES & DELIVERABLES:
+${respFormatted}
+   - CRITICAL REQUIREMENT: Derive questions directly from these daily responsibilities. Formulate scenarios that test whether the candidate can successfully execute these exact deliverables on the job.
+
+5. REQUIRED SKILLS SET & TECH STACK:
+   ${skillsFormatted}
+   - All questions, coding scenarios, and distractors MUST test and reference these specific technologies, frameworks, libraries, tools, and languages.
+================================================================================
+${input.focusTopic ? `\nADDITIONAL RECRUITER TOPIC FOCUS: ${input.focusTopic}\n` : ''}`;
+
+        if (format === 'rapid' || input.section === 'rapid') {
+          const rapidSeconds = input.timeLimitSeconds || 30;
+          prompt = `You are a Chief Technical Examiner and Hiring Specialist at LetGetIn.
+Generate strictly ${batchCount} high-quality, practical RAPID-FIRE / SPEED TECHNICAL assessment questions for the round: "${roundName}" (Type: ${roundType}).
+
+${roleHierarchyBlueprint}
+
+CRITICAL RULES:
+1. Every question MUST evaluate technical concepts, syntax, code output, or tools derived directly from the 5-tier Role Blueprint above (Job Title -> Experience -> JD -> Responsibilities -> Skills).
+2. Calibrate question depth and cognitive complexity to the Target Experience Level: "${expText}".
+3. Questions must be crisp, punchy, and solvable within ${rapidSeconds} seconds.
+4. Each question must provide 4 distinct options (opt_a, opt_b, opt_c, opt_d) with exactly one logically indisputable correct answer, and "timeLimitSeconds": ${rapidSeconds}.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "type": "rapid",
+      "question": "Punchy, job-relevant speed technical question designed for ${rapidSeconds}s",
+      "options": [
+        { "id": "opt_a", "text": "Option A" },
+        { "id": "opt_b", "text": "Option B" },
+        { "id": "opt_c", "text": "Option C" },
+        { "id": "opt_d", "text": "Option D" }
+      ],
+      "correctOptionId": "opt_a",
+      "timeLimitSeconds": ${rapidSeconds},
+      "points": 10,
+      "explanation": "Clear 1-2 line technical explanation linking to the job domain and role requirements"
+    }
+  ]
+}`;
+        } else if (format === 'descriptive' || input.section === 'descriptive') {
+          prompt = `You are a Chief Technical Examiner and Engineering Architect at LetGetIn.
+Generate strictly ${batchCount} practical, in-depth DESCRIPTIVE architectural / engineering challenge questions for the round: "${roundName}" (Type: ${roundType}).
+
+${roleHierarchyBlueprint}
+
+CRITICAL RULES:
+1. Every question MUST be grounded in real-world scenarios, architectural challenges, and daily deliverables derived directly from the 5-tier Role Blueprint above:
+   - Evaluates the Job Title ("${jobTitle}")
+   - Calibrated to the Experience Level ("${expText}")
+   - Directly contextualized by the Job Description
+   - Tests hands-on execution of the Key Responsibilities
+   - Requires usage of the Required Skills & Tech Stack
+2. These questions test how a candidate actually designs, implements, debugs, or solves real engineering tasks for this specific role.
+3. For every question, you MUST provide:
+   a) "question": A comprehensive practical scenario or problem statement requiring written technical explanation, architectural trade-offs, or pseudocode/algorithm steps.
+   b) "sampleAnswer": A comprehensive model solution and trade-off analysis.
+   c) "evaluationRubric": Point-by-point scoring criteria (e.g. "Approach & Architecture: 4 pts, Edge cases & Error Handling: 3 pts, Scalability & Performance: 3 pts").
+   d) "points": 10
+   e) "explanation": Key architectural insights and connection to the role's deliverables.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "type": "descriptive",
+      "question": "Comprehensive job-aligned technical challenge or architectural scenario",
+      "sampleAnswer": "Comprehensive technical answer, code/algorithm steps, and trade-off analysis",
+      "evaluationRubric": "Criteria for full and partial credit",
+      "points": 10,
+      "explanation": "Key architectural insights"
+    }
+  ]
+}`;
+        } else if (format === 'mixed') {
+          const descCount = Math.max(1, Math.round(batchCount * 0.3));
+          const mcqCount = Math.max(1, batchCount - descCount);
+
+          prompt = `You are a Chief Technical Examiner and Hiring Specialist at LetGetIn.
+Generate strictly ${batchCount} practical assessment questions (${mcqCount} MCQ questions and ${descCount} Descriptive challenge questions) for the round: "${roundName}" (Type: ${roundType}).
+
+${roleHierarchyBlueprint}
+
+CRITICAL RULES:
+1. Every question MUST be directly tailored to and derived from the 5-tier Role Blueprint above:
+   - Job Title: "${jobTitle}"
+   - Experience Level: "${expText}"
+   - Job Description
+   - Key Responsibilities
+   - Required Skill Set & Tech Stack
+2. For "mcq" questions: provide 4 distinct options (opt_a, opt_b, opt_c, opt_d) and "correctOptionId".
+3. For "descriptive" questions: provide "sampleAnswer" (model solution and trade-offs) and "evaluationRubric" (grading criteria).
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "type": "mcq",
+      "question": "Job-specific technical MCQ problem statement",
+      "options": [
+        { "id": "opt_a", "text": "Option A" },
+        { "id": "opt_b", "text": "Option B" },
+        { "id": "opt_c", "text": "Option C" },
+        { "id": "opt_d", "text": "Option D" }
+      ],
+      "correctOptionId": "opt_b",
+      "points": 10,
+      "explanation": "Clear explanation of the solution"
+    },
+    {
+      "type": "descriptive",
+      "question": "Practical technical scenario or system design challenge derived from job responsibilities",
+      "sampleAnswer": "Comprehensive model solution and trade-off analysis",
+      "evaluationRubric": "Grading breakdown criteria",
+      "points": 10,
+      "explanation": "Underlying engineering principle"
+    }
+  ]
+}`;
+        } else {
+          prompt = `You are a Chief Technical Examiner and Hiring Specialist at LetGetIn.
+Generate strictly ${batchCount} high-quality, practical multiple-choice technical assessment questions for the round: "${roundName}" (Type: ${roundType}).
+
+${roleHierarchyBlueprint}
+
+CRITICAL RULES:
+1. Every question MUST directly evaluate technical competence, concepts, algorithms, frameworks, or best practices derived from the 5-tier Role Blueprint:
+   - Job Title: "${jobTitle}"
+   - Experience Level: "${expText}"
+   - Job Description
+   - Key Responsibilities
+   - Required Skills & Tech Stack
+2. Avoid generic trivia; prefer practical scenario-based questions that test how candidates solve real problems in this role.
+3. Each question must provide 4 distinct options (A, B, C, D) with exactly one logically indisputable correct answer, and a clear technical explanation.
+
+Format strictly as JSON with this exact schema:
+{
+  "questions": [
+    {
+      "question": "Comprehensive technical scenario or code/concept problem statement",
+      "options": [
+        { "id": "opt_a", "text": "Option A" },
+        { "id": "opt_b", "text": "Option B" },
+        { "id": "opt_c", "text": "Option C" },
+        { "id": "opt_d", "text": "Option D" }
+      ],
+      "correctOptionId": "opt_b",
+      "points": 10,
+      "explanation": "Clear explanation of why this answer is correct"
+    }
+  ]
+}`;
+        }
+      }
+
+      const response = await GoogleProvider.getInstance().generate({
+        prompt,
+        promptName: isGeneralAptitude ? `aptitude_batch_${batchIdx + 1}` : `round_batch_${batchIdx + 1}`,
+        jsonMode: true,
+        temperature: 0.35,
+      });
+
+      const parsed = JSON.parse(response.text.trim());
+      const rawList = Array.isArray(parsed) ? parsed : (parsed?.questions || parsed?.items || []);
+      return rawList.map((q: any, idx: number) => {
+        const isRapid =
+          format === 'rapid' ||
+          input.section === 'rapid' ||
+          q.type === 'rapid' ||
+          Boolean(q.timeLimitSeconds);
+
+        if (isRapid) {
+          return {
+            id: `cq_${Date.now().toString(36)}_${batchIdx}_${idx + 1}`,
+            target: 'ai_online_test' as const,
+            section: 'rapid' as const,
+            type: 'rapid' as const,
+            question: q.question,
+            options: Array.isArray(q.options) && q.options.length >= 2
+              ? q.options.map((opt: any, optIdx: number) => ({
+                  id: opt.id || `opt_${String.fromCharCode(97 + optIdx)}`,
+                  text: String(opt.text || opt),
+                }))
+              : [
+                  { id: 'opt_a', text: 'Option A' },
+                  { id: 'opt_b', text: 'Option B' },
+                  { id: 'opt_c', text: 'Option C' },
+                  { id: 'opt_d', text: 'Option D' },
+                ],
+            correctOptionId: q.correctOptionId || 'opt_a',
+            points: Number(q.points) || 10,
+            timeLimitSeconds: Number(q.timeLimitSeconds) || input.timeLimitSeconds || 30,
+            explanation: q.explanation || '',
+          };
+        }
+
+        const isDesc =
+          format === 'descriptive' ||
+          input.section === 'descriptive' ||
+          q.type === 'descriptive' ||
+          q.type === 'short_answer' ||
+          (!q.options || q.options.length < 2);
+
+        if (isDesc) {
+          return {
+            id: `cq_${Date.now().toString(36)}_${batchIdx}_${idx + 1}`,
+            target: 'ai_online_test' as const,
+            section: 'descriptive' as const,
+            type: 'descriptive' as const,
+            question: q.question,
+            sampleAnswer: q.sampleAnswer || q.expectedAnswer || q.explanation || 'Step-by-step problem-solving derivation.',
+            evaluationRubric: q.evaluationRubric || 'Award points for clear formulation, accurate calculation, and justified final answer.',
+            points: Number(q.points) || 10,
+            explanation: q.explanation || '',
+          };
+        }
+
+        return {
+          id: `cq_${Date.now().toString(36)}_${batchIdx}_${idx + 1}`,
+          target: 'ai_online_test' as const,
+          section: 'mcq' as const,
+          type: 'mcq' as const,
+          question: q.question,
+          options: Array.isArray(q.options) && q.options.length >= 2
+            ? q.options.map((opt: any, optIdx: number) => ({
+                id: opt.id || `opt_${String.fromCharCode(97 + optIdx)}`,
+                text: String(opt.text || opt),
+              }))
+            : [
+                { id: 'opt_a', text: 'Option A' },
+                { id: 'opt_b', text: 'Option B' },
+                { id: 'opt_c', text: 'Option C' },
+                { id: 'opt_d', text: 'Option D' },
+              ],
+          correctOptionId: q.correctOptionId || 'opt_a',
+          points: Number(q.points) || 10,
+          explanation: q.explanation || '',
+        };
+      });
+    };
+
+    // Run batches concurrently in parallel
+    const batchTasks: Promise<any[]>[] = [];
+    for (let i = 0; i < numBatches; i++) {
+      const currentBatchCount = Math.min(BATCH_SIZE, count - (i * BATCH_SIZE));
+      batchTasks.push(
+        generateBatch(i, currentBatchCount).catch((err) => {
+          console.warn(`[DomainAssessmentService] Batch ${i + 1} failed:`, err?.message);
+          return [];
+        })
+      );
+    }
+
+    const batchResults = await Promise.all(batchTasks);
+    const collectedQuestions = batchResults.flat();
+
+    if (collectedQuestions.length > 0) {
+      return collectedQuestions.slice(0, count);
+    }
+
+    // Curated fallbacks
+    if (isGeneralAptitude) {
+      if (format === 'descriptive') {
+        const aptitudeDescriptiveFallbacks = [
+          {
+            question: 'A retail firm has fixed overhead costs of $120,000 per month and variable costs of $30 per unit. The product sells for $60 per unit. Calculate the monthly break-even unit volume. Then, show step-by-step how a 15% increase in variable costs changes the required break-even volume.',
+            sampleAnswer: '1. Initial contribution margin = $60 - $30 = $30. Initial break-even = $120,000 / $30 = 4,000 units.\n2. New variable cost = $30 * 1.15 = $34.50. New contribution margin = $60 - $34.50 = $25.50.\n3. New break-even volume = $120,000 / $25.50 = 4,705.88 (~4,706 units). The firm must sell 706 additional units (+17.65%) to reach break-even.',
+            evaluationRubric: '1. Correct initial break-even calculation (3 pts); 2. Correct revised contribution margin calculation (3 pts); 3. Accurate final break-even volume and percentage impact explanation (4 pts).',
+            points: 10,
+            explanation: 'Tests multi-step quantitative break-even and financial ratio reasoning.',
+          },
+          {
+            question: 'Five committee members (P, Q, R, S, T) sit in a straight row facing north. S sits at one extreme end. Q is second to the right of P. R sits immediately left of T. P is not adjacent to S. Deduce the unique seating arrangement from left to right, justifying each elimination step.',
+            sampleAnswer: 'Step 1: S must be at Position 5 (if S=1, P cannot be at 2, so P=3 => Q=5 which contradicts S=1/5).\nStep 2: With S at 5, P sits at 1 and Q sits at 3.\nStep 3: R is immediately left of T. Positions 2 and 4 are free => R=2, T=4.\nValidated final order from left to right: P, R, Q, T, S.',
+            evaluationRubric: '1. Step-by-step constraint elimination (4 pts); 2. Correct placement of S and P (3 pts); 3. Validated final order P, R, Q, T, S (3 pts).',
+            points: 10,
+            explanation: 'Tests logical deduction and constraint satisfaction reasoning.',
+          },
+          {
+            question: 'A project is handled by two teams. Team Alpha can complete it in 20 days, and Team Beta can complete it in 30 days. Both work together for 6 days, after which Team Beta is replaced by Team Gamma. If Alpha and Gamma finish the remaining work in 8 days, calculate how many days Team Gamma would take to complete the entire project working alone.',
+            sampleAnswer: 'Step 1: Daily rates: Alpha = 1/20, Beta = 1/30. Combined rate = 1/20 + 1/30 = 5/60 = 1/12.\nStep 2: In 6 days, Alpha + Beta complete 6 * (1/12) = 1/2 of the project. Remaining work = 1/2.\nStep 3: In 8 days, Alpha completes 8 * (1/20) = 8/20 = 2/5 of the project.\nStep 4: Gamma must complete the rest of the 1/2 work in 8 days: 1/2 - 2/5 = 5/10 - 4/10 = 1/10 of the project.\nStep 5: Gamma completes 1/10 work in 8 days => Standalone time = 8 / (1/10) = 80 days.',
+            evaluationRubric: '1. Correct combined work of Alpha & Beta for 6 days (3 pts); 2. Correct calculation of Alpha\'s contribution in remaining phase (3 pts); 3. Accurate derivation of Gamma\'s standalone completion time (80 days) (4 pts).',
+            points: 10,
+            explanation: 'Tests multi-agent fractional work & time algebraic reasoning.',
+          },
+          {
+            question: 'A company surveyed 1,000 employees and found that those who used a standing desk reported 20% fewer musculoskeletal complaints. Based on this, HR proposed purchasing standing desks for all 10,000 company staff to reduce healthcare claims. Identify two major logical fallacies or confounding variables in this reasoning and explain how HR should empirically test this hypothesis before full rollout.',
+            sampleAnswer: '1. Self-selection bias: Employees who initially requested standing desks may already be more health-conscious, exercise more, or have better ergonomics.\n2. Post hoc / correlation vs causation: Standing desks may not be the direct causal mechanism (e.g., increased movement or stretching during the day could be the actual cause).\n3. Proposed empirical test: Run a randomized controlled trial (A/B testing) with 200 randomly assigned employees over 3-6 months with pre-and-post health surveys.',
+            evaluationRubric: '1. Identification of self-selection bias (3 pts); 2. Distinction between correlation vs causation (3 pts); 3. Realistic randomized controlled validation framework (4 pts).',
+            points: 10,
+            explanation: 'Tests critical reasoning, bias identification, and empirical analysis.',
+          },
+        ];
+
+        return aptitudeDescriptiveFallbacks.map((f, idx) => ({
+          id: `cq_${Date.now().toString(36)}_${idx + 1}`,
+          target: 'ai_online_test' as const,
+          section: 'descriptive' as const,
+          type: 'descriptive' as const,
+          question: f.question,
+          sampleAnswer: f.sampleAnswer,
+          evaluationRubric: f.evaluationRubric,
+          points: f.points,
+          explanation: f.explanation,
+        }));
+      }
+
+      if (format === 'rapid' || input.section === 'rapid') {
+        const aptitudeRapidFallbacks = [
+          {
+            question: 'Quick Math: What is 15% of 240?',
+            options: [
+              { id: 'opt_a', text: '32' },
+              { id: 'opt_b', text: '36' },
+              { id: 'opt_c', text: '38' },
+              { id: 'opt_d', text: '42' },
+            ],
+            correctOptionId: 'opt_b',
+            points: 10,
+            timeLimitSeconds: 30,
+            explanation: '10% of 240 is 24, 5% is 12. 24 + 12 = 36.',
+          },
+          {
+            question: 'Rapid Logic: If 3 cats catch 3 mice in 3 minutes, how many cats are needed to catch 100 mice in 100 minutes?',
+            options: [
+              { id: 'opt_a', text: '3' },
+              { id: 'opt_b', text: '33' },
+              { id: 'opt_c', text: '100' },
+              { id: 'opt_d', text: '300' },
+            ],
+            correctOptionId: 'opt_a',
+            points: 10,
+            timeLimitSeconds: 30,
+            explanation: '1 cat catches 1 mouse in 3 minutes. 3 cats catch 100 mice in 100 minutes.',
+          },
+          {
+            question: 'Speed Series: Complete the sequence: 2, 6, 12, 20, 30, ...?',
+            options: [
+              { id: 'opt_a', text: '38' },
+              { id: 'opt_b', text: '40' },
+              { id: 'opt_c', text: '42' },
+              { id: 'opt_d', text: '44' },
+            ],
+            correctOptionId: 'opt_c',
+            points: 10,
+            timeLimitSeconds: 30,
+            explanation: 'Sequence follows n*(n+1): 1*2=2, 2*3=6, 3*4=12, 4*5=20, 5*6=30, 6*7=42.',
+          },
+          {
+            question: 'Mental Ratio: If A : B = 2 : 3 and B : C = 4 : 5, what is A : C?',
+            options: [
+              { id: 'opt_a', text: '8 : 15' },
+              { id: 'opt_b', text: '6 : 15' },
+              { id: 'opt_c', text: '8 : 12' },
+              { id: 'opt_d', text: '2 : 5' },
+            ],
+            correctOptionId: 'opt_a',
+            points: 10,
+            timeLimitSeconds: 30,
+            explanation: 'A/C = (A/B) * (B/C) = (2/3) * (4/5) = 8/15.',
+          },
+        ];
+
+        return aptitudeRapidFallbacks.map((f, idx) => ({
+          id: `cq_${Date.now().toString(36)}_${idx + 1}`,
+          target: 'ai_online_test' as const,
+          section: 'rapid' as const,
+          type: 'rapid' as const,
+          question: f.question,
+          options: f.options,
+          correctOptionId: f.correctOptionId,
+          points: f.points,
+          timeLimitSeconds: input.timeLimitSeconds || f.timeLimitSeconds || 30,
+          explanation: f.explanation,
+        }));
+      }
+
+      const aptitudeFallbacks = [
+        {
+          question: 'A can complete a piece of work in 12 days, and B can complete the same work in 18 days. If they work together for 4 days, what fraction of the total work remains to be completed?',
+          options: [
+            { id: 'opt_a', text: '1/3' },
+            { id: 'opt_b', text: '4/9' },
+            { id: 'opt_c', text: '5/9' },
+            { id: 'opt_d', text: '2/5' },
+          ],
+          correctOptionId: 'opt_b',
+          points: 10,
+          explanation: "A's 1-day work = 1/12, B's 1-day work = 1/18. Combined 1-day work = 5/36. In 4 days, they complete 4 * (5/36) = 20/36 = 5/9. Remaining work = 1 - 5/9 = 4/9.",
+        },
+        {
+          question: 'Find the missing number in the sequence: 4, 9, 19, 39, 79, ...?',
+          options: [
+            { id: 'opt_a', text: '149' },
+            { id: 'opt_b', text: '159' },
+            { id: 'opt_c', text: '169' },
+            { id: 'opt_d', text: '179' },
+          ],
+          correctOptionId: 'opt_b',
+          points: 10,
+          explanation: 'The pattern is multiply by 2 and add 1: 4*2+1=9, 9*2+1=19, 19*2+1=39, 39*2+1=79, 79*2+1=159.',
+        },
+        {
+          question: 'A merchant marks goods 40% above the cost price and allows a discount of 25% on the marked price. What is the merchant net profit percentage?',
+          options: [
+            { id: 'opt_a', text: '5%' },
+            { id: 'opt_b', text: '10%' },
+            { id: 'opt_c', text: '12%' },
+            { id: 'opt_d', text: '15%' },
+          ],
+          correctOptionId: 'opt_a',
+          points: 10,
+          explanation: 'Let CP = $100. MP = $140. Discount = 25% of 140 = $35. SP = 140 - 35 = $105. Net profit = (105 - 100) = 5%.',
+        },
+        {
+          question: 'Statements: (1) All birds have wings. (2) Some winged creatures can swim. Which conclusion logically follows?',
+          options: [
+            { id: 'opt_a', text: 'All birds can swim' },
+            { id: 'opt_b', text: 'Some creatures that can swim have wings' },
+            { id: 'opt_c', text: 'No birds can swim' },
+            { id: 'opt_d', text: 'All creatures that swim are birds' },
+          ],
+          correctOptionId: 'opt_b',
+          points: 10,
+          explanation: 'From statement 2, "Some winged creatures can swim" directly converts by conversion to "Some creatures that can swim have wings".',
+        },
+        {
+          question: 'A train 150 meters long is traveling at a speed of 54 km/h. How many seconds will it take to pass a stationary telegraph post?',
+          options: [
+            { id: 'opt_a', text: '8 seconds' },
+            { id: 'opt_b', text: '10 seconds' },
+            { id: 'opt_c', text: '12 seconds' },
+            { id: 'opt_d', text: '15 seconds' },
+          ],
+          correctOptionId: 'opt_b',
+          points: 10,
+          explanation: 'Speed in m/s = 54 * (5/18) = 15 m/s. Time to pass a post = distance / speed = 150 / 15 = 10 seconds.',
+        },
+        {
+          question: 'Pointing towards a photograph, a woman says: "His father is the only son of my grandfather." How is the man in the photograph related to the woman?',
+          options: [
+            { id: 'opt_a', text: 'Brother' },
+            { id: 'opt_b', text: 'Uncle' },
+            { id: 'opt_c', text: 'Cousin' },
+            { id: 'opt_d', text: 'Father' },
+          ],
+          correctOptionId: 'opt_a',
+          points: 10,
+          explanation: 'Only son of my grandfather = Father. Father of the man in photograph = Father of the woman. Therefore, the man is her brother.',
+        },
+      ];
+
+      return aptitudeFallbacks.map((f, idx) => ({
+        id: `cq_${Date.now().toString(36)}_${idx + 1}`,
+        target: 'ai_online_test' as const,
+        section: 'mcq' as const,
+        type: 'mcq' as const,
+        question: f.question,
+        options: f.options,
+        correctOptionId: f.correctOptionId,
+        points: f.points,
+        explanation: f.explanation,
+      }));
+    }
+
+    const fallbacks = [
+      {
+        question: `In the context of ${jobTitle} (${skills}), which approach provides the most optimal time-space tradeoff for processing high-volume stream data?`,
+        options: [
+          { id: 'opt_a', text: 'In-memory sliding window aggregation with backpressure buffering' },
+          { id: 'opt_b', text: 'Synchronous blocking disk writes per event' },
+          { id: 'opt_c', text: 'Unbounded memory accumulator without eviction policy' },
+          { id: 'opt_d', text: 'Sequential batch polling every 24 hours' },
+        ],
+        correctOptionId: 'opt_a',
+        points: 10,
+        explanation: 'Sliding window with backpressure prevents memory exhaustion while maintaining sub-second processing latency.',
+      },
+      {
+        question: 'Which of the following best prevents cascading failures in distributed microservice architectures?',
+        options: [
+          { id: 'opt_a', text: 'Unlimited retry loops without delay' },
+          { id: 'opt_b', text: 'Circuit Breaker pattern with exponential backoff and jitter' },
+          { id: 'opt_c', text: 'Increasing server thread pool limits indefinitely' },
+          { id: 'opt_d', text: 'Disabling health checks under load' },
+        ],
+        correctOptionId: 'opt_b',
+        points: 10,
+        explanation: 'Circuit breakers immediately fail fast when downstream dependencies degrade, preserving upstream capacity.',
+      },
+      {
+        question: 'When designing idempotent REST APIs, which HTTP method is non-idempotent by specification?',
+        options: [
+          { id: 'opt_a', text: 'GET' },
+          { id: 'opt_b', text: 'PUT' },
+          { id: 'opt_c', text: 'POST' },
+          { id: 'opt_d', text: 'DELETE' },
+        ],
+        correctOptionId: 'opt_c',
+        points: 10,
+        explanation: 'POST creates a new subordinate resource on repeated calls, making it non-idempotent without explicit idempotency keys.',
+      },
+    ];
+
+    return fallbacks.map((f, idx) => ({
+      id: `cq_${Date.now().toString(36)}_${idx + 1}`,
+      target: 'ai_online_test' as const,
+      type: 'mcq' as const,
+      question: f.question,
+      options: f.options,
+      correctOptionId: f.correctOptionId,
+      points: f.points,
+      explanation: f.explanation,
+    }));
+  }
+
+  /**
    * Create a new Domain Specific Assessment (Standalone entity)
    */
   public async createAssessment(

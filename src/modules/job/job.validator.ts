@@ -68,12 +68,25 @@ export const structuredRequirementsSchema = z
 export const assessmentRoundTypeSchema = z.enum([
   'general',
   'coding',
+  'custom_test',
+  'custom_interview',
+  'custom_domain',
+  'general_aptitude',
+  'technical_test',
+  'rapid_round',
+  'ai_assessment',
+  'domain',
+  'skills',
+  'technical',
+  'rapid_question',
 ]);
 
 export const generalAssessmentQuestionTypeSchema = z.enum([
   'mcq',
   'short_answer',
   'scenario',
+  'descriptive',
+  'rapid',
 ]);
 
 export const generalAssessmentConfigSchema = z
@@ -159,7 +172,7 @@ export const assessmentRoundSchema = z
             message: 'Coding cannot be a question type inside General Assessment. Coding Assessment must be configured as a separate round.',
             path: ['config', 'questionTypes'],
           });
-        } else if (!['mcq', 'short_answer', 'scenario'].includes(qt as string)) {
+        } else if (!['mcq', 'short_answer', 'scenario', 'descriptive', 'rapid'].includes(qt as string)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: `Invalid question type "${qt}" for General Assessment`,
@@ -284,6 +297,28 @@ export const jobAssessmentConfigSchema = z
     }
   );
 
+export const linguisticTestSchema = z.object({
+  enabled: z.boolean().default(false),
+  language: z.string().optional(),
+  speak: z.boolean().optional(),
+  read: z.boolean().optional(),
+  write: z.boolean().optional(),
+  fluencyScore: z.number().min(0).max(100).optional(),
+  expertiseScore: z.number().min(0).max(100).optional(),
+  nativeSpeaker: z.boolean().optional(),
+  certificateType: z.string().optional(),
+  certificateScore: z.string().optional(),
+});
+
+export const psychometricGeniusTestSchema = z.object({
+  psychometricEnabled: z.boolean().optional(),
+  geniusEnabled: z.boolean().optional(),
+  psychometricSchedule: z.any().optional(),
+  geniusSchedule: z.any().optional(),
+  psychometricDuration: z.number().optional(),
+  geniusDuration: z.number().optional(),
+});
+
 export const createJobSchema = z.object({
   body: z
     .object({
@@ -316,11 +351,18 @@ export const createJobSchema = z.object({
       assessment: jobAssessmentConfigSchema.optional(),
       listAsJob: z.boolean().optional(),
       featuredJob: z.boolean().optional(),
+      listInLandingPage: z.boolean().optional(),
+      listInRecentlyPosted: z.boolean().optional(),
+      checkResumeVerification: z.boolean().optional(),
+      linguisticTest: linguisticTestSchema.optional(),
+      psychometricGeniusTest: psychometricGeniusTestSchema.optional(),
       pipelineOptions: z
         .object({
           matchVolume: z.string().nullable().optional(),
           resumeMatch: z.boolean().default(false),
           resumeMatchTypes: z.array(z.string()).optional(),
+          checkResumeVerification: z.boolean().optional(),
+          onlineTestSource: z.string().optional(),
           assessment: z.boolean().default(false),
           assessmentTypes: z.array(z.string()).optional(),
           aiInterview: z.boolean().default(false),
@@ -330,9 +372,15 @@ export const createJobSchema = z.object({
           roundOrder: z.array(z.string()).optional(),
           listAsJob: z.boolean().optional(),
           featuredJob: z.boolean().optional(),
+          listInLandingPage: z.boolean().optional(),
+          listInRecentlyPosted: z.boolean().optional(),
           screeningSchedule: z.any().optional(),
           technicalSchedule: z.any().optional(),
+          videoSchedule: z.any().optional(),
+          linguisticTest: linguisticTestSchema.optional(),
+          psychometricGeniusTest: psychometricGeniusTestSchema.optional(),
         })
+        .passthrough()
         .optional(),
     })
     .refine(

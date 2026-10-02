@@ -4,6 +4,7 @@ export const generalAssessmentQuestionTypeSchema = z.enum([
   'mcq',
   'short_answer',
   'scenario',
+  'descriptive',
 ]);
 
 export const mcqOptionInputSchema = z.object({
@@ -35,6 +36,18 @@ export const createShortAnswerQuestionSchema = z.object({
   type: z.literal('short_answer'),
   question: z.string().trim().min(1, 'Question text cannot be empty'),
   expectedAnswer: z.string().trim().optional(),
+  sampleAnswer: z.string().trim().optional(),
+  evaluationRubric: z.string().trim().optional(),
+  evaluationCriteria: z.array(z.string().trim().min(1)).optional(),
+  ...baseQuestionFields,
+});
+
+export const createDescriptiveQuestionSchema = z.object({
+  type: z.literal('descriptive'),
+  question: z.string().trim().min(1, 'Question text cannot be empty'),
+  expectedAnswer: z.string().trim().optional(),
+  sampleAnswer: z.string().trim().optional(),
+  evaluationRubric: z.string().trim().optional(),
   evaluationCriteria: z.array(z.string().trim().min(1)).optional(),
   ...baseQuestionFields,
 });
@@ -51,6 +64,7 @@ export const createQuestionSchema = z
   .discriminatedUnion('type', [
     createMcqQuestionSchema,
     createShortAnswerQuestionSchema,
+    createDescriptiveQuestionSchema,
     createScenarioQuestionSchema,
   ])
   .superRefine((data, ctx) => {
@@ -91,6 +105,8 @@ export const updateQuestionSchema = z
     options: z.array(mcqOptionInputSchema).min(2).optional(),
     correctOptionId: z.string().trim().min(1).optional(),
     expectedAnswer: z.string().trim().optional(),
+    sampleAnswer: z.string().trim().optional(),
+    evaluationRubric: z.string().trim().optional(),
     context: z.string().trim().optional(),
     evaluationCriteria: z.array(z.string().trim().min(1)).optional(),
     metadata: z.record(z.unknown()).optional(),

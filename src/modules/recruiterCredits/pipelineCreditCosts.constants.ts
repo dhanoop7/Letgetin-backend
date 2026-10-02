@@ -21,10 +21,25 @@ export const PIPELINE_SUB_OPTIONS: Record<PipelineSection, PipelineSubOption[]> 
     { key: 'mcq', label: 'MCQ Assessment' },
     { key: 'short_answer', label: 'Short Answer Assessment' },
     { key: 'scenario', label: 'Scenario-Based Assessment' },
+    { key: 'general_aptitude', label: 'General Aptitude' },
+    { key: 'technical_test', label: 'Technical Test' },
+    { key: 'rapid_round', label: 'Rapid Round' },
+    { key: 'ai_assessment', label: 'AI Assessment' },
+    { key: 'skills', label: 'Skills Assessment' },
+    { key: 'technical', label: 'Technical Assessment' },
+    { key: 'rapid_question', label: 'Rapid Question Round' },
+    { key: 'domain_specific', label: 'Domain Specific Test' },
+    { key: 'custom_test', label: 'Custom Test' },
+    { key: 'custom_domain', label: 'Custom Domain' },
   ],
   aiInterview: [
     { key: 'screening', label: 'Screening' },
     { key: 'technical', label: 'Technical Interview' },
+    { key: 'video', label: 'Video Interview' },
+    { key: 'screening_interview', label: 'Screening Interview' },
+    { key: 'technical_interview', label: 'Technical Interview' },
+    { key: 'video_interview', label: 'Video Interview' },
+    { key: 'custom_interview', label: 'Custom Interview' },
   ],
 };
 
@@ -76,6 +91,7 @@ export interface PipelineSelection {
   matchVolume?: string | null;
   resumeMatch?: boolean;
   resumeMatchTypes?: string[];
+  checkResumeVerification?: boolean;
   assessment?: boolean;
   assessmentTypes?: string[];
   aiInterview?: boolean;
@@ -85,12 +101,16 @@ export interface PipelineSelection {
   roundOrder?: string[];
   listAsJob?: boolean;
   featuredJob?: boolean;
+  listInLandingPage?: boolean;
+  listInRecentlyPosted?: boolean;
+  videoSchedule?: any;
 }
 
 export interface SanitizedPipelineOptions {
   matchVolume: string | null;
   resumeMatch: boolean;
   resumeMatchTypes: string[];
+  checkResumeVerification: boolean;
   assessment: boolean;
   assessmentTypes: string[];
   aiInterview: boolean;
@@ -100,6 +120,8 @@ export interface SanitizedPipelineOptions {
   roundOrder?: string[];
   listAsJob?: boolean;
   featuredJob?: boolean;
+  listInLandingPage?: boolean;
+  listInRecentlyPosted?: boolean;
 }
 
 /**
@@ -138,17 +160,20 @@ export function sanitizePipelineSelection(input?: PipelineSelection): SanitizedP
 
   return {
     matchVolume,
-    resumeMatch: resumeMatchTypes.length > 0,
+    resumeMatch: resumeMatchTypes.length > 0 || !!input?.resumeMatch,
     resumeMatchTypes,
-    assessment: assessmentTypes.length > 0,
+    checkResumeVerification: !!input?.checkResumeVerification,
+    assessment: assessmentTypes.length > 0 || !!input?.assessment,
     assessmentTypes,
-    aiInterview: aiInterviewTypes.length > 0,
+    aiInterview: aiInterviewTypes.length > 0 || !!input?.aiInterview,
     aiInterviewTypes,
     humanInterview: !!input?.humanInterview || humanInterviewTypes.length > 0,
     humanInterviewTypes,
     roundOrder,
     listAsJob: !!input?.listAsJob,
     featuredJob: !!input?.featuredJob,
+    listInLandingPage: !!input?.listInLandingPage,
+    listInRecentlyPosted: !!input?.listInRecentlyPosted,
   };
 }
 
@@ -158,7 +183,10 @@ export function computePipelineCreditsCost(input?: PipelineSelection): number {
   const subOptionCount =
     sanitized.resumeMatchTypes.length + sanitized.assessmentTypes.length + sanitized.aiInterviewTypes.length;
   let totalCost = matchVolumeCost + subOptionCount * SUB_OPTION_CREDIT_COST;
+  if (sanitized.checkResumeVerification) totalCost += 10;
   if (sanitized.listAsJob) totalCost += 10;
   if (sanitized.featuredJob) totalCost += 10;
+  if (sanitized.listInLandingPage) totalCost += 10;
+  if (sanitized.listInRecentlyPosted) totalCost += 10;
   return totalCost;
 }

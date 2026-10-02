@@ -2,7 +2,7 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export type AssessmentDifficulty = 'junior' | 'mid' | 'senior' | 'lead' | 'principal';
 export type AssessmentStatus = 'draft' | 'ready' | 'published' | 'archived';
-export type QuestionType = 'mcq' | 'coding' | 'architecture' | 'system_design' | 'debugging' | 'short_answer';
+export type QuestionType = 'mcq' | 'coding' | 'architecture' | 'system_design' | 'debugging' | 'short_answer' | 'descriptive' | 'rapid';
 export type TestingMode = 'coding' | 'architecture' | 'system' | 'debugging' | 'database' | 'security';
 
 export interface IMcqOption {
@@ -26,6 +26,8 @@ export interface IDomainAssessmentQuestion {
   skill: string;
   difficulty: AssessmentDifficulty;
   points: number;
+  section?: 'mcq' | 'descriptive' | 'rapid' | string;
+  timeLimitSeconds?: number;
   instructions?: string;
   context?: string;
   starterCode?: string;
@@ -35,6 +37,8 @@ export interface IDomainAssessmentQuestion {
   options?: IMcqOption[];
   correctOptionId?: string;
   expectedAnswer?: string;
+  sampleAnswer?: string;
+  evaluationRubric?: string;
   evaluationCriteria?: string[];
 }
 
@@ -101,9 +105,11 @@ const DomainAssessmentQuestionSchema = new Schema<IDomainAssessmentQuestion>(
     question: { type: String, required: true, trim: true },
     type: {
       type: String,
-      enum: ['mcq', 'coding', 'architecture', 'system_design', 'debugging', 'short_answer'],
+      enum: ['mcq', 'coding', 'architecture', 'system_design', 'debugging', 'short_answer', 'descriptive', 'rapid'],
       default: 'mcq',
     },
+    section: { type: String, trim: true },
+    timeLimitSeconds: { type: Number },
     testingMode: {
       type: String,
       enum: ['coding', 'architecture', 'system', 'debugging', 'database', 'security'],
@@ -125,6 +131,8 @@ const DomainAssessmentQuestionSchema = new Schema<IDomainAssessmentQuestion>(
     options: { type: [McqOptionSchema], default: [] },
     correctOptionId: { type: String },
     expectedAnswer: { type: String },
+    sampleAnswer: { type: String },
+    evaluationRubric: { type: String },
     evaluationCriteria: { type: [String], default: [] },
   },
   { _id: false }

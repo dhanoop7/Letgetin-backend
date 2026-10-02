@@ -29,8 +29,10 @@ export interface IAssessmentQuestion {
   options?: IMcqOption[];
   correctOptionId?: string;
 
-  // Short Answer specific
+  // Short Answer & Descriptive specific
   expectedAnswer?: string;
+  sampleAnswer?: string;
+  evaluationRubric?: string;
 
   // Scenario specific
   context?: string;
@@ -39,6 +41,10 @@ export interface IAssessmentQuestion {
   evaluationCriteria?: string[];
 
   // Internal metadata (e.g. AI generation metadata, version)
+  // Section & Timing (for multi-section stages e.g. general aptitude)
+  section?: 'mcq' | 'descriptive' | 'rapid' | string;
+  timeLimitSeconds?: number;
+
   metadata?: Record<string, unknown>;
 
   createdAt: Date;
@@ -63,10 +69,12 @@ export const AssessmentQuestionSchema = new Schema<IAssessmentQuestionDocument>(
     roundId: { type: String, required: true, trim: true, index: true },
     type: {
       type: String,
-      enum: ['mcq', 'short_answer', 'scenario'],
+      enum: ['mcq', 'short_answer', 'scenario', 'descriptive', 'rapid'],
       required: true,
       index: true,
     },
+    section: { type: String, trim: true, default: undefined },
+    timeLimitSeconds: { type: Number, default: undefined },
     order: { type: Number, required: true, min: 1 },
     question: { type: String, required: true, trim: true },
     instructions: { type: String, trim: true, default: undefined },
@@ -95,8 +103,18 @@ export const AssessmentQuestionSchema = new Schema<IAssessmentQuestionDocument>(
       default: undefined,
     },
 
-    // Short Answer specific
+    // Short Answer & Descriptive specific
     expectedAnswer: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    sampleAnswer: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    evaluationRubric: {
       type: String,
       trim: true,
       default: undefined,

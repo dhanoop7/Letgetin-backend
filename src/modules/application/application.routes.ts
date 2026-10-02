@@ -9,6 +9,8 @@ router.use(authenticate);
 
 router.get('/', asyncHandler(ApplicationController.getApplications));
 router.get('/:id/tracking', asyncHandler(ApplicationController.getApplicationTracking));
+router.get('/:id/stage-test', asyncHandler(ApplicationController.getStageTest));
+router.post('/:id/submit-stage', asyncHandler(ApplicationController.submitStageAttempt));
 router.post('/', asyncHandler(ApplicationController.createApplication));
 router.patch('/:id/status', asyncHandler(ApplicationController.updateStatus));
 router.delete('/:id', asyncHandler(ApplicationController.deleteApplication));

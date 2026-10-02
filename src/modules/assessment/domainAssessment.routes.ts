@@ -14,6 +14,10 @@ router.post('/generate-questions', optionalAuthenticate, (req, res, next) =>
   domainAssessmentController.generateQuestions(req, res, next)
 );
 
+router.post('/generate-round-questions', optionalAuthenticate, (req, res, next) =>
+  domainAssessmentController.generateRoundQuestions(req, res, next)
+);
+
 // Assessments CRUD
 router.post('/', optionalAuthenticate, (req, res, next) =>
   domainAssessmentController.createAssessment(req, res, next)

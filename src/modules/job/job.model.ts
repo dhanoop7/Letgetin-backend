@@ -100,8 +100,28 @@ export function formatEducationRequirements(edu?: IJobEducationRequirement): str
   return base;
 }
 
-export type AssessmentRoundType = 'general' | 'coding';
-export type GeneralAssessmentQuestionType = 'mcq' | 'short_answer' | 'scenario';
+export type AssessmentRoundType =
+  | 'general'
+  | 'coding'
+  | 'custom_test'
+  | 'custom_interview'
+  | 'custom_domain'
+  | 'general_aptitude'
+  | 'technical_test'
+  | 'rapid_round'
+  | 'ai_assessment'
+  | 'domain'
+  | 'skills'
+  | 'technical'
+  | 'rapid_question'
+  | 'screening_interview'
+  | 'technical_interview'
+  | 'video_interview'
+  | 'domain_specific'
+  | 'linguistic'
+  | 'psychometric'
+  | 'genius';
+export type GeneralAssessmentQuestionType = 'mcq' | 'short_answer' | 'scenario' | 'descriptive' | 'rapid' | 'rapid_question';
 
 export interface IAssessmentRoundConfig {
   id: string;
@@ -119,6 +139,38 @@ export interface IAssessmentRoundConfig {
 export interface IJobAssessmentConfig {
   enabled: boolean;
   rounds: IAssessmentRoundConfig[];
+}
+
+export interface ILinguisticTestConfig {
+  enabled: boolean;
+  language?: string;
+  speak?: boolean;
+  read?: boolean;
+  write?: boolean;
+  fluencyScore?: number;
+  expertiseScore?: number;
+  nativeSpeaker?: boolean;
+  certificateType?: string;
+  certificateScore?: string;
+}
+
+export interface IPsychometricGeniusTestConfig {
+  psychometricEnabled?: boolean;
+  geniusEnabled?: boolean;
+  psychometricSchedule?: {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    durationMinutes?: number;
+  };
+  geniusSchedule?: {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    durationMinutes?: number;
+  };
+  psychometricDuration?: number;
+  geniusDuration?: number;
 }
 
 export interface IJobDocument extends Document {
@@ -180,9 +232,20 @@ export interface IJobDocument extends Document {
     roundOrder?: string[];
     listAsJob?: boolean;
     featuredJob?: boolean;
+    listInLandingPage?: boolean;
+    listInRecentlyPosted?: boolean;
+    checkResumeVerification?: boolean;
+    onlineTestSource?: string;
+    linguisticTest?: ILinguisticTestConfig;
+    psychometricGeniusTest?: IPsychometricGeniusTestConfig;
   };
   listAsJob?: boolean;
   featuredJob?: boolean;
+  listInLandingPage?: boolean;
+  listInRecentlyPosted?: boolean;
+  checkResumeVerification?: boolean;
+  linguisticTest?: ILinguisticTestConfig;
+  psychometricGeniusTest?: IPsychometricGeniusTestConfig;
   assessment?: IJobAssessmentConfig;
   recruiterStage?: RecruiterJobStage;
   completedAt?: Date;
@@ -227,7 +290,28 @@ const AssessmentRoundSchema = new Schema<IAssessmentRoundConfig>(
     id: { type: String, required: true, trim: true },
     type: {
       type: String,
-      enum: ['general', 'coding'],
+      enum: [
+        'general',
+        'coding',
+        'custom_test',
+        'custom_interview',
+        'custom_domain',
+        'general_aptitude',
+        'technical_test',
+        'rapid_round',
+        'ai_assessment',
+        'domain',
+        'skills',
+        'technical',
+        'rapid_question',
+        'screening_interview',
+        'technical_interview',
+        'video_interview',
+        'domain_specific',
+        'linguistic',
+        'psychometric',
+        'genius',
+      ],
       required: true,
     },
     order: { type: Number, required: true, min: 1 },
@@ -337,9 +421,56 @@ const JobSchema = new Schema<IJobDocument>(
       roundOrder: { type: [String], default: undefined },
       listAsJob: { type: Boolean, default: false },
       featuredJob: { type: Boolean, default: false },
+      listInLandingPage: { type: Boolean, default: false },
+      listInRecentlyPosted: { type: Boolean, default: false },
+      checkResumeVerification: { type: Boolean, default: false },
+      onlineTestSource: { type: String, default: 'ai' },
+      linguisticTest: {
+        enabled: { type: Boolean, default: false },
+        language: { type: String, default: 'English' },
+        speak: { type: Boolean, default: false },
+        read: { type: Boolean, default: false },
+        write: { type: Boolean, default: false },
+        fluencyScore: { type: Number, min: 0, max: 100 },
+        expertiseScore: { type: Number, min: 0, max: 100 },
+        nativeSpeaker: { type: Boolean, default: false },
+        certificateType: { type: String, default: '' },
+        certificateScore: { type: String, default: '' },
+      },
+      psychometricGeniusTest: {
+        psychometricEnabled: { type: Boolean, default: false },
+        geniusEnabled: { type: Boolean, default: false },
+        psychometricSchedule: { type: Schema.Types.Mixed },
+        geniusSchedule: { type: Schema.Types.Mixed },
+        psychometricDuration: { type: Number },
+        geniusDuration: { type: Number },
+      },
     },
     listAsJob: { type: Boolean, default: false },
     featuredJob: { type: Boolean, default: false },
+    listInLandingPage: { type: Boolean, default: false },
+    listInRecentlyPosted: { type: Boolean, default: false },
+    checkResumeVerification: { type: Boolean, default: false },
+    linguisticTest: {
+      enabled: { type: Boolean, default: false },
+      language: { type: String, default: 'English' },
+      speak: { type: Boolean, default: false },
+      read: { type: Boolean, default: false },
+      write: { type: Boolean, default: false },
+      fluencyScore: { type: Number, min: 0, max: 100 },
+      expertiseScore: { type: Number, min: 0, max: 100 },
+      nativeSpeaker: { type: Boolean, default: false },
+      certificateType: { type: String, default: '' },
+      certificateScore: { type: String, default: '' },
+    },
+    psychometricGeniusTest: {
+      psychometricEnabled: { type: Boolean, default: false },
+      geniusEnabled: { type: Boolean, default: false },
+      psychometricSchedule: { type: Schema.Types.Mixed },
+      geniusSchedule: { type: Schema.Types.Mixed },
+      psychometricDuration: { type: Number },
+      geniusDuration: { type: Number },
+    },
     assessment: { type: JobAssessmentSchema, default: () => ({ enabled: false, rounds: [] }) },
     recruiterStage: {
       type: String,

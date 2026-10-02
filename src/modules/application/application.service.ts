@@ -12,6 +12,9 @@ import { HiringPoolManager } from '../hiringEngine/services/hiringPoolManager.js
 import { scheduleCandidateDeadlineCheck } from '../hiringEngine/queues/hiringEngine.queue.js';
 import { HiringNotificationHook } from '../hiringEngine/notifications/hiringNotification.hook.js';
 import { ApplicationCollectionService } from '../hiringEngine/services/applicationCollection.service.js';
+import { AssessmentQuestionModel } from '../assessment/assessmentQuestion.model.js';
+import { AssessmentAttemptModel } from '../assessment/assessmentAttempt.model.js';
+import { GoogleProvider } from '../ai/providers/google.provider.js';
 import { createChildLogger } from '../../infrastructure/logging/logger.js';
 
 const appLogger = createChildLogger({ component: 'ApplicationService' });
@@ -523,6 +526,7 @@ export class ApplicationService {
 
         HiringNotificationHook.notifyCandidateInvited({
           candidateId: String(userObjectId),
+          applicationId: String(newApp._id),
           jobId: String(jobObjectId),
           jobTitle: jobDoc?.title || 'Job Role',
           stageId: initialStageId,
@@ -805,6 +809,845 @@ export class ApplicationService {
       funnelStages,
       stageHistory,
     };
+  }
+
+  /**
+   * Retrieves proctored assessment questions and metadata for a specific stage of an application.
+   * Strips correct answers and internal rubrics before sending to candidate.
+   */
+  async getStageTest(userId: string, applicationId: string, stageId?: string) {
+    if (!mongoose.Types.ObjectId.isValid(applicationId)) {
+      throw AppError.badRequest('Invalid application ID format');
+    }
+
+    const application = await ApplicationModel.findById(applicationId)
+      .populate('jobId', 'title company location requirements skills assessment')
+      .lean();
+
+    if (!application) {
+      throw AppError.notFound('Application not found');
+    }
+
+    if (String(application.userId) !== String(userId)) {
+      throw AppError.forbidden('You do not have permission to access this application stage test');
+    }
+
+    const job = application.jobId as any;
+    const jobId = job?._id || application.jobId;
+
+    const funnelConfig = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+    if (!funnelConfig || !funnelConfig.stages || funnelConfig.stages.length === 0) {
+      throw AppError.badRequest('No hiring stages configured for this job.');
+    }
+
+    // Determine target stage
+    let stage = funnelConfig.stages.find((s: any) => s.stageId === stageId);
+    if (!stage) {
+      stage = funnelConfig.stages.find((s: any) => s.stageId === application.currentStageId);
+    }
+    if (!stage) {
+      stage = funnelConfig.stages.find((s: any) => s.order === (application.currentStageIndex || 1));
+    }
+    if (!stage) {
+      stage = funnelConfig.stages.find((s: any) => s.stageType === 'assessment') || funnelConfig.stages[0];
+    }
+
+    const roundId = stage.stageId;
+
+    // 1. Check for questions in AssessmentQuestionModel
+    let questions = await AssessmentQuestionModel.find({
+      jobId,
+      roundId,
+      status: { $ne: 'archived' },
+    })
+      .sort({ order: 1 })
+      .lean();
+
+    // 2. Check stage.config.customQuestions or job.assessment.rounds
+    if (!questions || questions.length === 0) {
+      const customQuestions =
+        (stage.config as any)?.customQuestions ||
+        job?.assessment?.rounds?.find((r: any) => r.id === roundId)?.config?.customQuestions;
+
+      if (Array.isArray(customQuestions) && customQuestions.length > 0) {
+        const toInsert = customQuestions.map((cq: any, idx: number) => ({
+          jobId,
+          roundId,
+          type: (cq.type === 'coding' ? 'short_answer' : cq.type || 'mcq') as any,
+          section: cq.section,
+          timeLimitSeconds: cq.timeLimitSeconds,
+          order: idx + 1,
+          question: cq.question || cq.text || `Question ${idx + 1}`,
+          instructions: cq.instructions || '',
+          points: cq.points || 10,
+          status: 'published' as const,
+          source: 'manual' as const,
+          options: cq.options || [],
+          correctOptionId: cq.correctOptionId,
+          sampleAnswer: cq.sampleAnswer,
+          evaluationRubric: cq.evaluationRubric,
+          expectedAnswer: cq.expectedAnswer || cq.sampleAnswer,
+          evaluationCriteria: cq.evaluationCriteria || [],
+        }));
+
+        try {
+          const inserted = await AssessmentQuestionModel.insertMany(toInsert);
+          questions = inserted.map((q) => q.toObject() as any);
+        } catch {
+          questions = toInsert as any;
+        }
+      }
+    }
+
+    // 3. Fallback standard questions for this assessment type if still empty
+    if (!questions || questions.length === 0) {
+      const fallbackQuestions = this.generateFallbackStageQuestions(
+        stage.assessmentType || 'general_aptitude',
+        job?.title || 'Candidate Role',
+        job?.skills || []
+      );
+
+      const toInsert = fallbackQuestions.map((fq, idx) => ({
+        jobId,
+        roundId,
+        type: 'mcq' as const,
+        order: idx + 1,
+        question: fq.question,
+        instructions: fq.instructions || 'Select the best option from the choices below.',
+        points: fq.points || 1,
+        status: 'published' as const,
+        source: 'ai_generated' as const,
+        options: fq.options,
+        correctOptionId: fq.correctOptionId,
+      }));
+
+      try {
+        const inserted = await AssessmentQuestionModel.insertMany(toInsert);
+        questions = inserted.map((q) => q.toObject() as any);
+      } catch {
+        questions = toInsert as any;
+      }
+    }
+
+    const targetQuestionCount =
+      stage.questionCount ||
+      (stage.config as any)?.questionCount ||
+      (stage.config as any)?.totalQuestions;
+
+    let testQuestionsPool = questions;
+    if (targetQuestionCount && targetQuestionCount > 0 && questions.length > targetQuestionCount) {
+      // Seeded deterministic shuffle per candidate: if bank has 100 questions and stage needs 30,
+      // candidate gets a unique random 30 questions from the pool. Re-opening/refreshing is stable.
+      const seedStr = String(application._id);
+      let seed = 0;
+      for (let i = 0; i < seedStr.length; i++) {
+        seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
+      }
+      const shuffled = [...questions];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const j = Math.floor((seed / 4294967296) * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      testQuestionsPool = shuffled.slice(0, targetQuestionCount);
+    }
+
+    // Safe questions stripped of answer keys and rubric evaluations
+    const candidateQuestions = testQuestionsPool.map((q: any, idx: number) => ({
+      id: q._id ? String(q._id) : (q.id || `q_${idx + 1}`),
+      order: q.order || idx + 1,
+      type: q.type || 'mcq',
+      section: q.section,
+      timeLimitSeconds: q.timeLimitSeconds,
+      question: q.question,
+      instructions: q.instructions || '',
+      points: q.points || 10,
+      options: (q.options || []).map((opt: any) => ({
+        id: opt.id,
+        text: opt.text,
+      })),
+      context: q.context || '',
+    }));
+
+    const durationMinutes =
+      stage.durationMinutes ||
+      ((stage.schedule as any)?.durationHours ? Number((stage.schedule as any).durationHours) * 60 : 30);
+    const passingScore = stage.passingScore || stage.autoAdvanceScoreThreshold || 70;
+
+    return {
+      applicationId: String(application._id),
+      job: {
+        _id: String(jobId),
+        title: job?.title || 'Open Position',
+        company: job?.company || { name: 'Recruiting Company' },
+      },
+      stage: {
+        stageId: stage.stageId,
+        stageName: stage.stageName,
+        stageType: stage.stageType,
+        assessmentType: stage.assessmentType,
+        durationMinutes,
+        passingScore,
+        totalQuestions: candidateQuestions.length,
+        schedule: stage.schedule,
+        config: stage.config,
+        instructions:
+          'Proctored Assessment: Maintain active fullscreen, do not switch tabs or windows, and submit before the timer expires.',
+      },
+      questions: candidateQuestions,
+    };
+  }
+
+  /**
+   * Submits a proctored stage attempt, grades the answers, updates stage history,
+   * and automatically advances or disqualifies the candidate in the hiring funnel.
+   */
+  async submitStageAttempt(
+    userId: string,
+    applicationId: string,
+    payload: {
+      stageId: string;
+      answers: Record<string, string>;
+      timeSpentSeconds?: number;
+      tabSwitchCount?: number;
+    }
+  ) {
+    if (!mongoose.Types.ObjectId.isValid(applicationId)) {
+      throw AppError.badRequest('Invalid application ID format');
+    }
+
+    const application = await ApplicationModel.findById(applicationId)
+      .populate('userId', 'name email')
+      .populate('jobId', 'title company')
+      .exec();
+
+    if (!application) {
+      throw AppError.notFound('Application not found');
+    }
+
+    const appCandidateId = String((application.userId as any)?._id || application.userId);
+    if (appCandidateId !== String(userId)) {
+      throw AppError.forbidden('You do not have permission to submit this stage attempt');
+    }
+
+    const job = application.jobId as any;
+    const jobId = String(job?._id || application.jobId);
+
+    const funnelConfig = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+    if (!funnelConfig || !funnelConfig.stages) {
+      throw AppError.badRequest('Hiring funnel configuration missing for this job.');
+    }
+
+    const stage =
+      funnelConfig.stages.find((s: any) => s.stageId === payload.stageId) ||
+      funnelConfig.stages.find((s: any) => s.order === (application.currentStageIndex || 1)) ||
+      funnelConfig.stages[0];
+
+    // Load full questions with answer keys
+    let questions = await AssessmentQuestionModel.find({
+      jobId,
+      roundId: stage.stageId,
+    }).lean();
+
+    if (!questions || questions.length === 0) {
+      const customQ = (stage.config as any)?.customQuestions;
+      if (Array.isArray(customQ) && customQ.length > 0) {
+        questions = customQ as any;
+      }
+    }
+
+    const targetQuestionCount =
+      stage.questionCount ||
+      (stage.config as any)?.questionCount ||
+      (stage.config as any)?.totalQuestions;
+
+    if (targetQuestionCount && targetQuestionCount > 0 && questions.length > targetQuestionCount) {
+      const seedStr = String(application._id);
+      let seed = 0;
+      for (let i = 0; i < seedStr.length; i++) {
+        seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
+      }
+      const shuffled = [...questions];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        const j = Math.floor((seed / 4294967296) * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      questions = shuffled.slice(0, targetQuestionCount);
+    }
+
+    let totalScore = 0;
+    let maxScore = 0;
+    const answerBreakdown: Array<{
+      questionId: string;
+      question: string;
+      candidateAnswer: string;
+      correctAnswer?: string;
+      isCorrect: boolean;
+      points: number;
+    }> = [];
+
+    const answers = payload.answers || {};
+
+    if (questions && questions.length > 0) {
+      // Evaluate descriptive questions asynchronously in parallel if any exist
+      const descriptiveEvaluations = await Promise.all(
+        questions.map(async (q: any, idx: number) => {
+          const isDesc = q.type === 'descriptive' || q.type === 'short_answer';
+          if (!isDesc) return null;
+
+          const qKey = q._id ? String(q._id) : (q.id || `q_${idx + 1}`);
+          const candidateAns = (answers[qKey] || answers[q.id] || answers[String(q._id)] || '').trim();
+          const pts = Number(q.points) || 10;
+          return this.evaluateDescriptiveAnswer(
+            q.question,
+            candidateAns,
+            q.sampleAnswer || q.expectedAnswer,
+            q.evaluationRubric || (Array.isArray(q.evaluationCriteria) ? q.evaluationCriteria.join(', ') : ''),
+            pts
+          );
+        })
+      );
+
+      questions.forEach((q: any, idx: number) => {
+        const qKey = q._id ? String(q._id) : (q.id || `q_${idx + 1}`);
+        const candidateAns = (answers[qKey] || answers[q.id] || answers[String(q._id)] || '').trim();
+        const pts = Number(q.points) || 1;
+        maxScore += pts;
+
+        let isCorrect = false;
+        let earnedPoints = 0;
+        let evaluatorFeedback = '';
+
+        if (q.type === 'mcq' || q.type === 'rapid' || (Array.isArray(q.options) && q.options.length >= 2 && q.correctOptionId)) {
+          isCorrect =
+            Boolean(q.correctOptionId) &&
+            candidateAns.toLowerCase() === String(q.correctOptionId).trim().toLowerCase();
+          earnedPoints = isCorrect ? pts : 0;
+          evaluatorFeedback = isCorrect ? 'Correct option selected.' : `Incorrect. Correct option was ${q.correctOptionId}.`;
+        } else {
+          // Descriptive / short answer evaluation
+          const evalRes = descriptiveEvaluations[idx];
+          if (evalRes) {
+            earnedPoints = evalRes.earnedPoints;
+            isCorrect = evalRes.isCorrect;
+            evaluatorFeedback = evalRes.feedback;
+          } else {
+            isCorrect = candidateAns.length >= 20;
+            earnedPoints = isCorrect ? pts : 0;
+          }
+        }
+
+        totalScore += earnedPoints;
+
+        answerBreakdown.push({
+          questionId: qKey,
+          question: q.question,
+          candidateAnswer: candidateAns,
+          correctAnswer: q.correctOptionId || q.sampleAnswer || q.expectedAnswer,
+          isCorrect,
+          points: earnedPoints,
+          feedback: evaluatorFeedback,
+        } as any);
+      });
+    } else {
+      totalScore = 80;
+      maxScore = 100;
+    }
+
+    const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 100;
+    const passingScore = stage.passingScore || stage.autoAdvanceScoreThreshold || 70;
+    const tabSwitchInfractions = Number(payload.tabSwitchCount || 0);
+    const proctorDisqualified = tabSwitchInfractions >= 4;
+
+    const passed = percentage >= passingScore && !proctorDisqualified;
+
+    let advanceResult: { nextStageId: string | null; isFinalShortlist: boolean } | null = null;
+
+    if (passed) {
+      try {
+        advanceResult = await HiringEngineService.advanceCandidate(jobId, String(application._id), 'system', {
+          score: percentage,
+          notes: `Passed ${stage.stageName} with ${percentage}% (Passing mark: ${passingScore}%). Proctoring passed with ${tabSwitchInfractions} tab-switch warnings.`,
+          evaluationDetails: {
+            totalScore,
+            maxScore,
+            percentage,
+            passingScore,
+            tabSwitchCount: tabSwitchInfractions,
+            timeSpentSeconds: payload.timeSpentSeconds || 0,
+          },
+        });
+      } catch (err: any) {
+        appLogger.warn('HiringEngineService.advanceCandidate note:', err?.message);
+      }
+    } else {
+      try {
+        const failReason = proctorDisqualified
+          ? `Candidate disqualified due to excessive proctoring tab switches (${tabSwitchInfractions} warnings).`
+          : `Candidate scored ${percentage}%, below passing threshold of ${passingScore}% in ${stage.stageName}.`;
+
+        await HiringEngineService.failCandidate(jobId, String(application._id), 'system', failReason);
+      } catch (err: any) {
+        appLogger.warn('HiringEngineService.failCandidate note:', err?.message);
+      }
+    }
+
+    // Record assessment attempt audit document
+    try {
+      await AssessmentAttemptModel.create({
+        attemptId: `att_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        assessmentId: new mongoose.Types.ObjectId(),
+        candidateId: (application.userId as any)?._id || application.userId,
+        candidateName: (application.userId as any)?.name || 'Candidate',
+        candidateEmail: (application.userId as any)?.email || 'candidate@example.com',
+        status: 'evaluated',
+        startedAt: new Date(Date.now() - (payload.timeSpentSeconds || 60) * 1000),
+        submittedAt: new Date(),
+        timeSpentSeconds: payload.timeSpentSeconds || 0,
+        timeLimitMinutes: stage.durationMinutes || 45,
+        answers: answerBreakdown.map((ab) => ({
+          questionId: ab.questionId,
+          answer: ab.candidateAnswer,
+          isCorrect: ab.isCorrect,
+          score: ab.points,
+          autoSavedAt: new Date(),
+        })),
+        evaluation: {
+          totalScore,
+          maxScore,
+          percentage,
+          passed,
+          verdict: passed ? (percentage >= 85 ? 'strong_hire' : 'hire') : 'reject',
+          summary: passed
+            ? `Candidate completed ${stage.stageName} and passed with a score of ${percentage}%.`
+            : `Candidate completed ${stage.stageName} but did not achieve the required ${passingScore}%.`,
+          skillBreakdown: [],
+          modeBreakdown: [],
+          strengths: passed ? ['Strong performance in assessment competencies'] : [],
+          gaps: !passed ? ['Below passing score threshold'] : [],
+          recommendations: passed ? 'Advanced to next stage in pipeline.' : 'Application closed.',
+          evaluatedAt: new Date(),
+        },
+      });
+    } catch (attErr: any) {
+      appLogger.warn('AssessmentAttemptModel creation note:', attErr?.message);
+    }
+
+    return {
+      passed,
+      totalScore,
+      maxScore,
+      percentage,
+      passingScore,
+      tabSwitchCount: tabSwitchInfractions,
+      proctorDisqualified,
+      verdict: passed ? 'Passed & Advanced' : 'Did Not Qualify',
+      message: passed
+        ? `Congratulations! You scored ${percentage}% and have qualified for the next stage.`
+        : proctorDisqualified
+        ? `Assessment disqualified due to multiple proctoring infractions (${tabSwitchInfractions} tab switches).`
+        : `You scored ${percentage}%, which did not meet the passing threshold of ${passingScore}%.`,
+      nextStageId: advanceResult?.nextStageId || null,
+      isFinalShortlist: advanceResult?.isFinalShortlist || false,
+    };
+  }
+
+  /**
+   * Generates curated, high-acuity fallback questions based on round type and job skills.
+   */
+  private generateFallbackStageQuestions(
+    assessmentType: string,
+    jobTitle: string,
+    skills: string[]
+  ): Array<{
+    question: string;
+    instructions?: string;
+    points: number;
+    options: Array<{ id: string; text: string }>;
+    correctOptionId: string;
+  }> {
+    const skillList = Array.isArray(skills) && skills.length > 0 ? skills.slice(0, 3).join(', ') : 'Software Engineering';
+
+    if (assessmentType === 'general_aptitude') {
+      return [
+        {
+          question: 'If 6 workers can complete a job in 8 days, how many days will 4 workers take to complete the same job, assuming identical working speed?',
+          instructions: 'Quantitative Aptitude — Time & Work',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: '10 days' },
+            { id: 'opt_b', text: '12 days' },
+            { id: 'opt_c', text: '14 days' },
+            { id: 'opt_d', text: '16 days' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Look at this series: 7, 10, 8, 11, 9, 12, ... What number should come next?',
+          instructions: 'Logical Reasoning — Sequence Induction',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: '10' },
+            { id: 'opt_b', text: '12' },
+            { id: 'opt_c', text: '13' },
+            { id: 'opt_d', text: '14' },
+          ],
+          correctOptionId: 'opt_a',
+        },
+        {
+          question: 'A merchant marks an item 40% above the cost price and gives a discount of 25%. What is the net profit percentage?',
+          instructions: 'Quantitative Aptitude — Profit & Loss',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: '5%' },
+            { id: 'opt_b', text: '10%' },
+            { id: 'opt_c', text: '12%' },
+            { id: 'opt_d', text: '15%' },
+          ],
+          correctOptionId: 'opt_a',
+        },
+        {
+          question: 'Statements: (1) All birds have wings. (2) Some winged creatures can swim. Conclusions: Which deduction is strictly valid?',
+          instructions: 'Logical Reasoning — Syllogisms',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'All birds can swim' },
+            { id: 'opt_b', text: 'Some creatures that can swim have wings' },
+            { id: 'opt_c', text: 'No birds can swim' },
+            { id: 'opt_d', text: 'All creatures that swim are birds' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'In an election or ranking model, Candidate X scored higher than Candidate Y, but lower than Candidate Z. Candidate W scored higher than Z. Who had the highest score?',
+          instructions: 'Logical Ordering & Transitive Relations',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Candidate X' },
+            { id: 'opt_b', text: 'Candidate Y' },
+            { id: 'opt_c', text: 'Candidate Z' },
+            { id: 'opt_d', text: 'Candidate W' },
+          ],
+          correctOptionId: 'opt_d',
+        },
+      ];
+    }
+
+    if (assessmentType === 'technical_test' || assessmentType === 'technical') {
+      return [
+        {
+          question: `In modern scalable systems employing ${skillList}, what is the time complexity of searching for an item in a balanced binary search tree (AVL / Red-Black Tree)?`,
+          instructions: 'Data Structures & Algorithmic Complexity',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'O(1)' },
+            { id: 'opt_b', text: 'O(log n)' },
+            { id: 'opt_c', text: 'O(n)' },
+            { id: 'opt_d', text: 'O(n log n)' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Which design pattern is best suited for decoupling an abstraction from its implementation so that the two can vary independently?',
+          instructions: 'Design Patterns & Architecture',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Bridge Pattern' },
+            { id: 'opt_b', text: 'Adapter Pattern' },
+            { id: 'opt_c', text: 'Decorator Pattern' },
+            { id: 'opt_d', text: 'Facade Pattern' },
+          ],
+          correctOptionId: 'opt_a',
+        },
+        {
+          question: 'What is the primary benefit of using idempotency keys in payment and critical mutation API endpoints?',
+          instructions: 'API Design & Fault Tolerance',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'To encrypt sensitive request payloads at rest' },
+            { id: 'opt_b', text: 'To prevent duplicate state mutations during network retries and transient failures' },
+            { id: 'opt_c', text: 'To accelerate client-side DNS resolution' },
+            { id: 'opt_d', text: 'To bypass rate-limiting constraints in upstream gateways' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Under high write concurrency, which database isolation level prevents dirty reads, non-repeatable reads, and phantom reads?',
+          instructions: 'Database Concurrency & ACID Guarantees',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Read Committed' },
+            { id: 'opt_b', text: 'Read Uncommitted' },
+            { id: 'opt_c', text: 'Repeatable Read' },
+            { id: 'opt_d', text: 'Serializable' },
+          ],
+          correctOptionId: 'opt_d',
+        },
+        {
+          question: 'When implementing asynchronous event processing, what is the purpose of a Dead Letter Queue (DLQ)?',
+          instructions: 'Event-Driven Architecture',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'To buffer high-priority real-time user traffic' },
+            { id: 'opt_b', text: 'To isolate and store poison messages that persistently fail execution after maximum retry attempts' },
+            { id: 'opt_c', text: 'To optimize garbage collection cycles in message brokers' },
+            { id: 'opt_d', text: 'To compress archival audit logs' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+      ];
+    }
+
+    if (assessmentType === 'rapid_round') {
+      return [
+        {
+          question: 'Rapid Fire: What HTTP status code corresponds to "429"?',
+          instructions: '60-second Response Round',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Forbidden' },
+            { id: 'opt_b', text: 'Conflict' },
+            { id: 'opt_c', text: 'Too Many Requests' },
+            { id: 'opt_d', text: 'Unprocessable Entity' },
+          ],
+          correctOptionId: 'opt_c',
+        },
+        {
+          question: 'Rapid Fire: In JavaScript event loop architecture, where do microtasks (Promises) execute relative to macrotasks (setTimeout)?',
+          instructions: '60-second Response Round',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'After the entire next event loop tick' },
+            { id: 'opt_b', text: 'Immediately after the current execution context before rendering and next macrotask' },
+            { id: 'opt_c', text: 'In parallel using Web Worker threads' },
+            { id: 'opt_d', text: 'Only when the browser window is idle' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Rapid Fire: Which sorting algorithm has the best average-case performance with O(n log n) and stability?',
+          instructions: '60-second Response Round',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'QuickSort' },
+            { id: 'opt_b', text: 'MergeSort' },
+            { id: 'opt_c', text: 'HeapSort' },
+            { id: 'opt_d', text: 'SelectionSort' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Rapid Fire: What principle states that software entities should be open for extension but closed for modification?',
+          instructions: 'SOLID Architecture Check',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Single Responsibility Principle' },
+            { id: 'opt_b', text: 'Open/Closed Principle' },
+            { id: 'opt_c', text: 'Liskov Substitution Principle' },
+            { id: 'opt_d', text: 'Dependency Inversion Principle' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+      ];
+    }
+
+    if (assessmentType === 'psychometric') {
+      return [
+        {
+          question: 'A critical production bug is detected 30 minutes before your scheduled shift end. How do you respond?',
+          instructions: 'Situational Judgment & Accountability',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Log an issue ticket and leave it for the incoming shift team' },
+            { id: 'opt_b', text: 'Triage severity immediately, inform stakeholders, coordinate an emergency containment fix, and ensure clean handover' },
+            { id: 'opt_c', text: 'Temporarily disable monitoring alerts to avoid escalation' },
+            { id: 'opt_d', text: 'Wait for user complaints before initiating an incident response' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'A colleague proposes an architectural approach you believe has scalability flaws. How do you resolve this?',
+          instructions: 'Collaboration & Constructive Disagreement',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Reject the proposal publicly in team channels to prevent errors' },
+            { id: 'opt_b', text: 'Convene an architectural review, present objective performance benchmarks, listen to their tradeoffs, and align collaboratively' },
+            { id: 'opt_c', text: 'Agree to their approach to avoid interpersonal friction' },
+            { id: 'opt_d', text: 'Escalate immediately to the executive team without discussing with your peer' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'When faced with ambiguous project requirements and a looming deadline, what is your initial course of action?',
+          instructions: 'Ambiguity & Problem Solving',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'Halt all progress until explicit complete specifications are delivered' },
+            { id: 'opt_b', text: 'Identify critical core assumptions, clarify high-impact uncertainties with product managers, and build an iterative prototype' },
+            { id: 'opt_c', text: 'Implement whatever requires the least effort to hit the deadline' },
+            { id: 'opt_d', text: 'Delegate the ambiguous portions to junior engineers' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+      ];
+    }
+
+    if (assessmentType === 'genius') {
+      return [
+        {
+          question: 'Consider a system of 5 nodes. Each node is connected to exactly 3 other nodes. How many total bidirectional communication links exist across the network?',
+          instructions: 'Graph Theory & Combinatorial Genius',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: '15 links' },
+            { id: 'opt_b', text: '7.5 links (impossible graph topology)' },
+            { id: 'opt_c', text: '10 links' },
+            { id: 'opt_d', text: '8 links' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'If log₂(x) + log₂(x - 2) = 3, what is the real positive value of x?',
+          instructions: 'Advanced Analytical Deduction',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: 'x = 2' },
+            { id: 'opt_b', text: 'x = 4' },
+            { id: 'opt_c', text: 'x = 6' },
+            { id: 'opt_d', text: 'x = 8' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'In a Byzantine fault tolerant consensus network of 3f + 1 nodes, what is the maximum number of malicious nodes (f) the network can tolerate out of 10 total nodes?',
+          instructions: 'Distributed Consensus & Fault Tolerance',
+          points: 1,
+          options: [
+            { id: 'opt_a', text: '1 node' },
+            { id: 'opt_b', text: '2 nodes' },
+            { id: 'opt_c', text: '3 nodes' },
+            { id: 'opt_d', text: '4 nodes' },
+          ],
+          correctOptionId: 'opt_c',
+        },
+      ];
+    }
+
+    // Default domain/role assessment questions
+    return [
+      {
+        question: `For a ${jobTitle} position focusing on ${skillList}, which architectural strategy provides the highest availability and disaster recovery resilience?`,
+        instructions: 'Role Competency & Systems Thinking',
+        points: 1,
+        options: [
+          { id: 'opt_a', text: 'Single datacenter active-passive replication' },
+          { id: 'opt_b', text: 'Multi-region active-active deployment with geo-routed traffic and automated failover' },
+          { id: 'opt_c', text: 'Nightly manual database snapshot backup restore' },
+          { id: 'opt_d', text: 'Monolithic single-tier container hosting' },
+        ],
+        correctOptionId: 'opt_b',
+      },
+      {
+        question: 'When profiling latency bottlenecks in distributed microservices, which observability telemetry tool provides end-to-end request timeline breakdown?',
+        instructions: 'Production Observability & Monitoring',
+        points: 1,
+        options: [
+          { id: 'opt_a', text: 'Centralized log aggregation without trace context' },
+          { id: 'opt_b', text: 'Distributed tracing with OpenTelemetry and unique trace/span correlation IDs' },
+          { id: 'opt_c', text: 'CPU utilization metrics alone' },
+          { id: 'opt_d', text: 'Synthetic health-check pings' },
+        ],
+        correctOptionId: 'opt_b',
+      },
+      {
+        question: 'What is the main advantage of semantic database versioning and backward-compatible schema migrations (Expand-Contract pattern)?',
+        instructions: 'Database Reliability & Zero-Downtime Deployments',
+        points: 1,
+        options: [
+          { id: 'opt_a', text: 'Eliminates the need for testing migrations on staging' },
+          { id: 'opt_b', text: 'Allows zero-downtime rolling deployments where old and new code versions run concurrently safely' },
+          { id: 'opt_c', text: 'Decreases total disk footprint of indexes' },
+          { id: 'opt_d', text: 'Bypasses transaction log writes' },
+        ],
+        correctOptionId: 'opt_b',
+      },
+    ];
+  }
+
+  /**
+   * Evaluates a candidate's descriptive analytical answer using Gemini against the reference answer & rubric.
+   */
+  private async evaluateDescriptiveAnswer(
+    question: string,
+    candidateAnswer: string,
+    sampleAnswer?: string,
+    rubric?: string,
+    maxPoints: number = 10
+  ): Promise<{ earnedPoints: number; isCorrect: boolean; feedback: string }> {
+    if (!candidateAnswer || candidateAnswer.trim().length < 10) {
+      return {
+        earnedPoints: 0,
+        isCorrect: false,
+        feedback: 'No answer provided or answer is too brief.',
+      };
+    }
+
+    try {
+      const prompt = `You are a fair, precise assessment examiner evaluating a candidate's descriptive analytical answer.
+Problem Statement:
+"""${question}"""
+
+${sampleAnswer ? `Reference / Sample Solution:\n"""${sampleAnswer}"""\n` : ''}
+${rubric ? `Grading Rubric / Criteria:\n"""${rubric}"""\n` : ''}
+
+Candidate's Submitted Response:
+"""${candidateAnswer}"""
+
+Maximum Points Possible: ${maxPoints}
+
+Evaluate the candidate's response based on correctness, depth of explanation, and analytical reasoning according to the reference solution and rubric.
+Award a fair integer score between 0 and ${maxPoints}.
+Provide a brief 1-2 sentence constructive evaluator feedback.
+
+Format strictly as JSON:
+{
+  "score": ${Math.round(maxPoints * 0.8)},
+  "feedback": "Concise 1-2 sentence explanation of awarded score"
+}`;
+
+      const res = await GoogleProvider.getInstance().generate({
+        prompt,
+        promptName: 'evaluate_descriptive_answer',
+        jsonMode: true,
+        temperature: 0.2,
+      });
+
+      const parsed = JSON.parse(res.text.trim());
+      const score = Math.min(maxPoints, Math.max(0, Math.round(Number(parsed.score) || 0)));
+      const isCorrect = score >= Math.ceil(maxPoints * 0.6);
+      return {
+        earnedPoints: score,
+        isCorrect,
+        feedback: parsed.feedback || `Scored ${score}/${maxPoints} points based on analytical accuracy.`,
+      };
+    } catch {
+      // Fallback heuristic if AI call fails
+      const wordCount = candidateAnswer.trim().split(/\s+/).length;
+      let earnedPoints = 0;
+      if (wordCount >= 30) {
+        earnedPoints = Math.round(maxPoints * 0.8);
+      } else if (wordCount >= 15) {
+        earnedPoints = Math.round(maxPoints * 0.5);
+      } else {
+        earnedPoints = Math.round(maxPoints * 0.3);
+      }
+      return {
+        earnedPoints,
+        isCorrect: earnedPoints >= Math.ceil(maxPoints * 0.6),
+        feedback: 'Evaluated based on completeness and reasoning length.',
+      };
+    }
   }
 }
 

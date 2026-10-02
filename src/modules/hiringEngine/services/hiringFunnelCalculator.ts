@@ -1,10 +1,12 @@
 import { AppError } from '../../../utils/appError.js';
-import { IFunnelStage, FunnelHealth } from '../hiringFunnelConfig.model.js';
+import { IFunnelStage, FunnelHealth, FunnelStageType } from '../hiringFunnelConfig.model.js';
+import { AssessmentRoundType } from '../../job/job.model.js';
 
 export interface StageCalculationInput {
   stageId: string;
   stageName: string;
-  stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
+  stageType: FunnelStageType;
+  assessmentType?: AssessmentRoundType | string;
   order: number;
   expectedAttendanceRate: number; // 0 < rate <= 1
   expectedPassRate: number;       // 0 < rate <= 1

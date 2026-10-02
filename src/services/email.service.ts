@@ -301,4 +301,122 @@ If you did not request this code, please ignore this email.
       return false;
     }
   }
+
+  /**
+   * Sends candidate stage invitation email for online tests / assessments / interviews.
+   */
+  static async sendStageInvitationEmail(data: {
+    toEmail: string;
+    candidateName: string;
+    jobTitle: string;
+    stageName: string;
+    testUrl: string;
+    deadline?: Date | string;
+    durationMinutes?: number;
+  }): Promise<boolean> {
+    const normalizedEmail = data.toEmail.toLowerCase().trim();
+
+    if (env.NODE_ENV === 'development' || !env.RESEND_API_KEY || !this.resendClient) {
+      console.log(
+        `[EMAIL SERVICE] 📨 Stage Invitation: ${data.candidateName} (${normalizedEmail}) invited to "${data.stageName}" for "${data.jobTitle}". Test Link: ${data.testUrl}`
+      );
+      return true;
+    }
+
+    const fromAddress = env.EMAIL_FROM || 'LetGetIn Hiring <onboarding@letgetin.com>';
+    const deadlineStr = data.deadline
+      ? new Date(data.deadline).toLocaleString('en-US', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        })
+      : 'Within 48 hours';
+    const durationText = data.durationMinutes ? `${data.durationMinutes} minutes` : '30-45 minutes';
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Assessment Invitation: ${data.stageName}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; color: #1e293b;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f8fafc; padding: 40px 15px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px; background-color: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05);">
+        <tr>
+          <td style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 32px 30px; text-align: center;">
+            <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff;">LetGetIn Assessment Invitation</h1>
+            <p style="margin: 6px 0 0 0; color: #e0e7ff; font-size: 14px;">Next Stage: ${data.stageName}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 32px 30px;">
+            <h2 style="margin: 0 0 12px 0; font-size: 18px; font-weight: 700; color: #0f172a;">Hello ${data.candidateName},</h2>
+            <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+              Congratulations! Your qualifications have qualified you for the <strong>${data.stageName}</strong> round for the position of <strong>${data.jobTitle}</strong>.
+            </p>
+            <div style="background-color: #f1f5f9; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+              <table width="100%" style="font-size: 13px; color: #334155;">
+                <tr><td style="padding: 4px 0; font-weight: 600;">Role:</td><td>${data.jobTitle}</td></tr>
+                <tr><td style="padding: 4px 0; font-weight: 600;">Round:</td><td>${data.stageName}</td></tr>
+                <tr><td style="padding: 4px 0; font-weight: 600;">Duration:</td><td>${durationText}</td></tr>
+                <tr><td style="padding: 4px 0; font-weight: 600;">Deadline:</td><td>${deadlineStr}</td></tr>
+              </table>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${data.testUrl}" target="_blank" style="display: inline-block; background: #4f46e5; color: #ffffff; font-weight: 700; font-size: 14px; padding: 14px 28px; border-radius: 10px; text-decoration: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);">
+                Start Assessment Now &rarr;
+              </a>
+            </div>
+            <p style="margin: 20px 0 0 0; font-size: 12px; line-height: 1.5; color: #64748b;">
+              <strong>Proctoring Notice:</strong> This assessment is administered in a secure full-screen browser environment. Please ensure you are in a quiet room with a stable internet connection.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background-color: #f8fafc; padding: 16px 30px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8;">
+            &copy; ${new Date().getFullYear()} LetGetIn AI. All rights reserved.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+
+    const textContent = `
+Hello ${data.candidateName},
+
+You have been invited to take the ${data.stageName} for ${data.jobTitle}.
+Deadline: ${deadlineStr}
+Duration: ${durationText}
+
+Access your proctored assessment here:
+${data.testUrl}
+
+Best regards,
+The LetGetIn Team
+`;
+
+    try {
+      const response = await this.resendClient.emails.send({
+        from: fromAddress,
+        to: [normalizedEmail],
+        subject: `Action Required: ${data.stageName} for ${data.jobTitle}`,
+        text: textContent,
+        html: htmlContent,
+      });
+
+      if (response.error) {
+        console.error('[EMAIL SERVICE] ❌ Resend API error:', response.error);
+        return false;
+      }
+      return true;
+    } catch (err: unknown) {
+      console.error('[EMAIL SERVICE] ❌ Error delivering stage invite:', err);
+      return false;
+    }
+  }
 }

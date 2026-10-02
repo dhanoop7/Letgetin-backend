@@ -1,6 +1,6 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview';
+export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview' | 'custom';
 export type FunnelConfigStatus = 'draft' | 'active' | 'completed' | 'paused';
 export type FunnelHealth = 'healthy' | 'constrained' | 'starved';
 
@@ -8,6 +8,7 @@ export interface IFunnelStage {
   stageId: string;
   stageName: string;
   stageType: FunnelStageType;
+  assessmentType?: AssessmentRoundType | string;
   order: number;
   expectedAttendanceRate: number; // > 0 and <= 1
   expectedPassRate: number;       // > 0 and <= 1
@@ -15,6 +16,19 @@ export interface IFunnelStage {
   deadlineHours: number;          // Hours before candidate is marked no_show if not started
   autoAdvanceScoreThreshold: number; // e.g. 70 out of 100
   autoRefillEnabled: boolean;
+  schedule?: {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    durationHours?: number | string;
+    durationFormatted?: string;
+  };
+  durationMinutes?: number;
+  passingScore?: number;
+  questionCount?: number;
+  interviewMode?: string;
+  modalities?: string[];
+  config?: Record<string, unknown>;
 }
 
 export interface IHiringFunnelConfigDocument extends Document {
@@ -40,8 +54,12 @@ const FunnelStageSchema = new Schema<IFunnelStage>(
     stageName: { type: String, required: true, trim: true },
     stageType: {
       type: String,
-      enum: ['resume_match', 'assessment', 'ai_interview', 'manual_review', 'human_interview'],
+      enum: ['resume_match', 'assessment', 'ai_interview', 'manual_review', 'human_interview', 'custom'],
       required: true,
+    },
+    assessmentType: {
+      type: String,
+      default: undefined,
     },
     order: { type: Number, required: true },
     expectedAttendanceRate: { type: Number, required: true, min: 0.01, max: 1.0 },
@@ -50,6 +68,19 @@ const FunnelStageSchema = new Schema<IFunnelStage>(
     deadlineHours: { type: Number, default: 48, min: 1 },
     autoAdvanceScoreThreshold: { type: Number, default: 70, min: 0, max: 100 },
     autoRefillEnabled: { type: Boolean, default: true },
+    schedule: {
+      date: { type: String, default: undefined },
+      startTime: { type: String, default: undefined },
+      endTime: { type: String, default: undefined },
+      durationHours: { type: Schema.Types.Mixed, default: undefined },
+      durationFormatted: { type: String, default: undefined },
+    },
+    durationMinutes: { type: Number, default: undefined },
+    passingScore: { type: Number, default: undefined },
+    questionCount: { type: Number, default: undefined },
+    interviewMode: { type: String, default: undefined },
+    modalities: { type: [String], default: undefined },
+    config: { type: Schema.Types.Mixed, default: undefined },
   },
   { _id: false }
 );

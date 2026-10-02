@@ -1,10 +1,13 @@
 import { EventEmitter } from 'events';
 import { createChildLogger } from '../../../infrastructure/logging/logger.js';
+import { EmailService } from '../../../services/email.service.js';
+import { ApplicationModel } from '../../application/application.model.js';
 
 const hiringLogger = createChildLogger({ component: 'HiringEngine' });
 
 export interface CandidateInvitedNotification {
   candidateId: string;
+  applicationId?: string;
   email?: string;
   fullName?: string;
   jobId: string;
@@ -87,7 +90,7 @@ class HiringNotificationHookEmitter extends EventEmitter {
   constructor() {
     super();
     // Default logging listener for traceability
-    this.on('candidateInvited', (data: CandidateInvitedNotification) => {
+    this.on('candidateInvited', async (data: CandidateInvitedNotification) => {
       hiringLogger.info(
         {
           event: 'candidate_invited',
@@ -102,6 +105,41 @@ class HiringNotificationHookEmitter extends EventEmitter {
       console.log(
         `📨 [HiringNotificationHook] Candidate "${data.fullName || data.candidateId}" invited to stage "${data.stageName}" for role "${data.jobTitle}" (Deadline: ${data.stageDeadline?.toISOString() || `${data.deadlineHours}h`})`
       );
+
+      // Automated invitation email dispatch for active assessment or interview stages
+      try {
+        let recipientEmail = data.email;
+        let recipientName = data.fullName;
+        let appId = data.applicationId;
+
+        if (!recipientEmail || !recipientName || !appId) {
+          const appDoc = await ApplicationModel.findOne(
+            appId ? { _id: appId } : { jobId: data.jobId, userId: data.candidateId }
+          ).populate('userId', 'email fullName username');
+          if (appDoc) {
+            appId = String(appDoc._id);
+            const userObj = appDoc.userId as any;
+            recipientEmail = recipientEmail || userObj?.email;
+            recipientName = recipientName || userObj?.fullName || userObj?.username || 'Candidate';
+          }
+        }
+
+        if (recipientEmail && appId) {
+          const clientBase = process.env.CLIENT_URL || 'http://localhost:3000';
+          const testUrl = `${clientBase}/assessment/take?applicationId=${encodeURIComponent(appId)}&stageId=${encodeURIComponent(data.stageId)}&jobId=${encodeURIComponent(data.jobId)}`;
+
+          await EmailService.sendStageInvitationEmail({
+            toEmail: recipientEmail,
+            candidateName: recipientName || 'Candidate',
+            jobTitle: data.jobTitle,
+            stageName: data.stageName,
+            testUrl,
+            deadline: data.stageDeadline,
+          });
+        }
+      } catch (err: any) {
+        hiringLogger.warn({ err: err?.message }, 'Failed to dispatch candidate stage invitation email');
+      }
     });
 
     this.on('candidatePassed', (data: CandidatePassedNotification) => {

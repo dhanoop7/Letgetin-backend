@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { HiringEngineController } from './hiringEngine.controller.js';
 import { authenticate, requireRole } from '../../middleware/auth.middleware.js';
 import { validate } from '../../middleware/validate.middleware.js';
@@ -9,6 +10,11 @@ import {
   refillStageSchema,
   finalDecisionSchema,
 } from './hiringEngine.validator.js';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+});
 
 // MergeParams: true allows accessing :jobId from parent route prefix
 const router = Router({ mergeParams: true });
@@ -22,7 +28,22 @@ router.post('/config', validate(configureHiringPipelineSchema), HiringEngineCont
 router.get('/config', HiringEngineController.getPipelineConfig);
 router.get('/funnel-metrics', HiringEngineController.getFunnelMetrics);
 
-// Stage Candidate Inspection
+// Sample Question Bank Template (Excel or CSV)
+router.get('/sample-question-template', HiringEngineController.downloadSampleTemplate);
+
+// Stage Configuration & Inspection
+router.get('/stages/:stageId', HiringEngineController.getStageDetails);
+router.put('/stages/:stageId', HiringEngineController.updateStageConfig);
+router.post(
+  '/stages/:stageId/upload-questions',
+  upload.single('file'),
+  HiringEngineController.uploadStageQuestions
+);
+router.post(
+  '/upload-questions',
+  upload.single('file'),
+  HiringEngineController.uploadStageQuestions
+);
 router.get('/stages/:stageId/candidates', HiringEngineController.getStageCandidates);
 
 // Candidate Stage Advancement & Failure (with Auto-Refill)

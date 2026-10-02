@@ -29,6 +29,150 @@ export interface IApplicationCollection {
   status: ApplicationCollectionStatus;
 }
 
+export type EducationLevel =
+  | 'none'
+  | 'high_school'
+  | 'associate'
+  | 'diploma'
+  | 'bachelor'
+  | 'master'
+  | 'doctorate'
+  | 'other';
+
+export interface IJobEducationRequirement {
+  minimumLevel?: EducationLevel;
+  fields?: string[];
+}
+
+export type SkillProficiency = 'beginner' | 'intermediate' | 'advanced' | 'expert';
+
+export interface IJobSkillRequirement {
+  name: string;
+  proficiency: SkillProficiency;
+}
+
+export class SkillRequirementArray extends Array<IJobSkillRequirement> {
+  includes(searchElement: string | IJobSkillRequirement | any, fromIndex?: number): boolean {
+    if (typeof searchElement === 'string') {
+      const lower = searchElement.toLowerCase().trim();
+      return this.some((s) => {
+        const name = typeof s === 'string' ? (s as string) : s?.name;
+        return typeof name === 'string' && name.toLowerCase().trim() === lower;
+      });
+    }
+    if (searchElement && typeof searchElement === 'object' && 'name' in searchElement) {
+      const lower = (searchElement as { name: string }).name.toLowerCase().trim();
+      return this.some((s) => (typeof s === 'string' ? (s as string).toLowerCase().trim() === lower : s.name.toLowerCase().trim() === lower));
+    }
+    return super.includes(searchElement, fromIndex);
+  }
+}
+
+export interface IJobRequirements {
+  requiredSkills: SkillRequirementArray;
+  preferredSkills: string[];
+  minimumExperienceYears?: number;
+  maximumExperienceYears?: number;
+  education?: IJobEducationRequirement;
+}
+
+export function formatEducationRequirements(edu?: IJobEducationRequirement): string {
+  if (!edu || !edu.minimumLevel || edu.minimumLevel === 'none') {
+    return 'No specific education requirement';
+  }
+  const levelNames: Record<EducationLevel, string> = {
+    none: 'No specific education requirement',
+    high_school: 'High School Diploma',
+    associate: 'Associate Degree',
+    diploma: 'Diploma',
+    bachelor: "Bachelor's Degree",
+    master: "Master's Degree",
+    doctorate: 'Doctorate / Ph.D.',
+    other: 'Degree / Equivalent Qualification',
+  };
+  const base = levelNames[edu.minimumLevel] || edu.minimumLevel;
+  if (edu.fields && edu.fields.length > 0) {
+    const fieldList = edu.fields.filter(Boolean).join(', ');
+    if (fieldList) {
+      return `${base} in ${fieldList}`;
+    }
+  }
+  return base;
+}
+
+export type AssessmentRoundType =
+  | 'general'
+  | 'coding'
+  | 'custom_test'
+  | 'custom_interview'
+  | 'custom_domain'
+  | 'general_aptitude'
+  | 'technical_test'
+  | 'rapid_round'
+  | 'ai_assessment'
+  | 'domain'
+  | 'skills'
+  | 'technical'
+  | 'rapid_question'
+  | 'screening_interview'
+  | 'technical_interview'
+  | 'video_interview'
+  | 'domain_specific'
+  | 'linguistic'
+  | 'psychometric'
+  | 'genius';
+export type GeneralAssessmentQuestionType = 'mcq' | 'short_answer' | 'scenario' | 'descriptive' | 'rapid' | 'rapid_question';
+
+export interface IAssessmentRoundConfig {
+  id: string;
+  type: AssessmentRoundType;
+  order: number;
+  name: string;
+  enabled: boolean;
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  durationHours?: number | string;
+  config?: Record<string, unknown>;
+}
+
+export interface IJobAssessmentConfig {
+  enabled: boolean;
+  rounds: IAssessmentRoundConfig[];
+}
+
+export interface ILinguisticTestConfig {
+  enabled: boolean;
+  language?: string;
+  speak?: boolean;
+  read?: boolean;
+  write?: boolean;
+  fluencyScore?: number;
+  expertiseScore?: number;
+  nativeSpeaker?: boolean;
+  certificateType?: string;
+  certificateScore?: string;
+}
+
+export interface IPsychometricGeniusTestConfig {
+  psychometricEnabled?: boolean;
+  geniusEnabled?: boolean;
+  psychometricSchedule?: {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    durationMinutes?: number;
+  };
+  geniusSchedule?: {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+    durationMinutes?: number;
+  };
+  psychometricDuration?: number;
+  geniusDuration?: number;
+}
+
 export interface IJobDocument extends Document {
   title: string;
   company: {
@@ -85,7 +229,23 @@ export interface IJobDocument extends Document {
     humanInterview?: boolean;
     humanInterviewTypes?: string[];
     roundOrder?: string[];
+    listAsJob?: boolean;
+    featuredJob?: boolean;
+    listInLandingPage?: boolean;
+    listInRecentlyPosted?: boolean;
+    checkResumeVerification?: boolean;
+    onlineTestSource?: string;
+    linguisticTest?: ILinguisticTestConfig;
+    psychometricGeniusTest?: IPsychometricGeniusTestConfig;
   };
+  listAsJob?: boolean;
+  featuredJob?: boolean;
+  listInLandingPage?: boolean;
+  listInRecentlyPosted?: boolean;
+  checkResumeVerification?: boolean;
+  linguisticTest?: ILinguisticTestConfig;
+  psychometricGeniusTest?: IPsychometricGeniusTestConfig;
+  assessment?: IJobAssessmentConfig;
   recruiterStage?: RecruiterJobStage;
   completedAt?: Date;
   creditsCost?: number;
@@ -97,6 +257,81 @@ export interface IJobDocument extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const JobEducationSchema = new Schema(
+  {
+    minimumLevel: {
+      type: String,
+      enum: ['none', 'high_school', 'associate', 'diploma', 'bachelor', 'master', 'doctorate', 'other'],
+      default: 'none',
+    },
+    fields: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+const JobRequirementsSchema = new Schema(
+  {
+    requiredSkills: { type: [Schema.Types.Mixed], default: [] },
+    preferredSkills: { type: [Schema.Types.Mixed], default: [] },
+    minimumExperienceYears: { type: Number, min: 0 },
+    maximumExperienceYears: { type: Number, min: 0 },
+    education: {
+      type: JobEducationSchema,
+      default: () => ({ minimumLevel: 'none', fields: [] }),
+    },
+  },
+  { _id: false }
+);
+
+const AssessmentRoundSchema = new Schema<IAssessmentRoundConfig>(
+  {
+    id: { type: String, required: true, trim: true },
+    type: {
+      type: String,
+      enum: [
+        'general',
+        'coding',
+        'custom_test',
+        'custom_interview',
+        'custom_domain',
+        'general_aptitude',
+        'technical_test',
+        'rapid_round',
+        'ai_assessment',
+        'domain',
+        'skills',
+        'technical',
+        'rapid_question',
+        'screening_interview',
+        'technical_interview',
+        'video_interview',
+        'domain_specific',
+        'linguistic',
+        'psychometric',
+        'genius',
+      ],
+      required: true,
+    },
+    order: { type: Number, required: true, min: 1 },
+    name: { type: String, required: true, trim: true },
+    enabled: { type: Boolean, default: true },
+    date: { type: String, default: undefined },
+    startTime: { type: String, default: undefined },
+    endTime: { type: String, default: undefined },
+    durationHours: { type: Schema.Types.Mixed, default: undefined },
+    config: { type: Schema.Types.Mixed, default: undefined },
+  },
+  { _id: false }
+);
+
+const JobAssessmentSchema = new Schema<IJobAssessmentConfig>(
+  {
+    enabled: { type: Boolean, default: false },
+    rounds: { type: [AssessmentRoundSchema], default: [] },
+  },
+  { _id: false }
+);
 
 const JobSchema = new Schema<IJobDocument>(
   {
@@ -182,7 +417,59 @@ const JobSchema = new Schema<IJobDocument>(
       humanInterview: { type: Boolean, default: false },
       humanInterviewTypes: { type: [String], default: [] },
       roundOrder: { type: [String], default: undefined },
+      listAsJob: { type: Boolean, default: false },
+      featuredJob: { type: Boolean, default: false },
+      listInLandingPage: { type: Boolean, default: false },
+      listInRecentlyPosted: { type: Boolean, default: false },
+      checkResumeVerification: { type: Boolean, default: false },
+      onlineTestSource: { type: String, default: 'ai' },
+      linguisticTest: {
+        enabled: { type: Boolean, default: false },
+        language: { type: String, default: 'English' },
+        speak: { type: Boolean, default: false },
+        read: { type: Boolean, default: false },
+        write: { type: Boolean, default: false },
+        fluencyScore: { type: Number, min: 0, max: 100 },
+        expertiseScore: { type: Number, min: 0, max: 100 },
+        nativeSpeaker: { type: Boolean, default: false },
+        certificateType: { type: String, default: '' },
+        certificateScore: { type: String, default: '' },
+      },
+      psychometricGeniusTest: {
+        psychometricEnabled: { type: Boolean, default: false },
+        geniusEnabled: { type: Boolean, default: false },
+        psychometricSchedule: { type: Schema.Types.Mixed },
+        geniusSchedule: { type: Schema.Types.Mixed },
+        psychometricDuration: { type: Number },
+        geniusDuration: { type: Number },
+      },
     },
+    listAsJob: { type: Boolean, default: false },
+    featuredJob: { type: Boolean, default: false },
+    listInLandingPage: { type: Boolean, default: false },
+    listInRecentlyPosted: { type: Boolean, default: false },
+    checkResumeVerification: { type: Boolean, default: false },
+    linguisticTest: {
+      enabled: { type: Boolean, default: false },
+      language: { type: String, default: 'English' },
+      speak: { type: Boolean, default: false },
+      read: { type: Boolean, default: false },
+      write: { type: Boolean, default: false },
+      fluencyScore: { type: Number, min: 0, max: 100 },
+      expertiseScore: { type: Number, min: 0, max: 100 },
+      nativeSpeaker: { type: Boolean, default: false },
+      certificateType: { type: String, default: '' },
+      certificateScore: { type: String, default: '' },
+    },
+    psychometricGeniusTest: {
+      psychometricEnabled: { type: Boolean, default: false },
+      geniusEnabled: { type: Boolean, default: false },
+      psychometricSchedule: { type: Schema.Types.Mixed },
+      geniusSchedule: { type: Schema.Types.Mixed },
+      psychometricDuration: { type: Number },
+      geniusDuration: { type: Number },
+    },
+    assessment: { type: JobAssessmentSchema, default: () => ({ enabled: false, rounds: [] }) },
     recruiterStage: {
       type: String,
       enum: ['open', 'shortlisting', 'interview', 'review', 'completed'],

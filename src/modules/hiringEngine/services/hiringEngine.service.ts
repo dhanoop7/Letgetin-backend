@@ -27,6 +27,7 @@ export interface StageMetrics {
   stageId: string;
   stageName: string;
   stageType: string;
+  assessmentType?: string;
   order: number;
   targetCount: number;
   activeCount: number; // invited + started + passed
@@ -37,6 +38,12 @@ export interface StageMetrics {
   noShowCount: number;
   deficit: number;
   reserveAvailable: number;
+  durationMinutes?: number;
+  passingScore?: number;
+  questionCount?: number;
+  isConfigured?: boolean;
+  schedule?: any;
+  config?: Record<string, unknown>;
 }
 
 export interface FunnelMetricsReport {
@@ -299,10 +306,17 @@ export class HiringEngineService {
       const deficit = Math.max(0, stage.targetCount - activeCount);
       totalDeficitAcrossStages += deficit;
 
+      const customQ = (stage.config as any)?.customQuestions;
+      const isConfigured = Boolean(
+        (stage.config as any)?.isConfigured || (Array.isArray(customQ) && customQ.length > 0)
+      );
+      const questionCount = Array.isArray(customQ) ? customQ.length : (stage.questionCount || 0);
+
       return {
         stageId: stage.stageId,
         stageName: stage.stageName,
         stageType: stage.stageType,
+        assessmentType: stage.assessmentType,
         order: stage.order,
         targetCount: stage.targetCount,
         activeCount,
@@ -313,6 +327,12 @@ export class HiringEngineService {
         noShowCount,
         deficit,
         reserveAvailable: reservePoolSize,
+        durationMinutes: stage.durationMinutes,
+        passingScore: stage.passingScore,
+        questionCount,
+        isConfigured,
+        schedule: stage.schedule,
+        config: stage.config,
       };
     });
 
@@ -547,6 +567,7 @@ export class HiringEngineService {
 
     HiringNotificationHook.notifyCandidateInvited({
       candidateId: String(application.userId),
+      applicationId: String(application._id),
       jobId: String(jobId),
       jobTitle: jobDoc?.title || 'Job Role',
       stageId: nextStage.stageId,
@@ -1350,5 +1371,234 @@ export class HiringEngineService {
   ) {
     await this.verifyJobOwnership(jobId, recruiterUserId);
     return CandidateStageHistoryModel.find({ applicationId, jobId }).sort({ enteredAt: 1 }).lean();
+  }
+
+  /**
+   * Retrieves full stage details with fallback to job assessment rounds.
+   */
+  public static async getStageDetails(jobId: string, stageId: string, recruiterUserId: string): Promise<IFunnelStage> {
+    const job = await this.verifyJobOwnership(jobId, recruiterUserId);
+    const config = await HiringFunnelConfigModel.findOne({ jobId }).lean();
+
+    let stage = config?.stages?.find((s) => s.stageId === stageId);
+    if (!stage) {
+      // Check in job.assessment.rounds
+      const round = job.assessment?.rounds?.find(
+        (r: any) => r.id === stageId || r.roundId === stageId || r.type === stageId
+      );
+      if (round) {
+        stage = {
+          stageId: round.id || stageId,
+          stageName: round.name || 'Assessment Stage',
+          stageType: 'assessment',
+          assessmentType: round.type,
+          order: round.order || 1,
+          targetCount: 10,
+          expectedAttendanceRate: 1,
+          expectedPassRate: 0.6,
+          deadlineHours: 48,
+          autoAdvanceScoreThreshold: (round.config as any)?.passingScore || 70,
+          autoRefillEnabled: true,
+          durationMinutes: (round.config as any)?.durationMinutes || 30,
+          passingScore: (round.config as any)?.passingScore || 70,
+          questionCount: (round.config as any)?.customQuestions?.length || 0,
+          schedule: (round.config as any)?.schedule || (round.date ? {
+            date: round.date,
+            startTime: round.startTime,
+            endTime: round.endTime,
+            durationHours: round.durationHours,
+          } : undefined),
+          config: (round.config || {}) as any,
+        } as any;
+      }
+    }
+
+    if (!stage) {
+      throw AppError.notFound(`Stage '${stageId}' not found.`);
+    }
+
+    // Merge job customQuestions if stage has none
+    const roundMatch = job.assessment?.rounds?.find(
+      (r: any) => r.id === stageId || r.roundId === stageId || r.type === stage?.assessmentType || r.roundType === stage?.assessmentType
+    );
+    if (roundMatch && (roundMatch.config as any)?.customQuestions?.length > 0) {
+      stage.config = stage.config || {};
+      if (!(stage.config as any).customQuestions || (stage.config as any).customQuestions.length === 0) {
+        (stage.config as any).customQuestions = (roundMatch.config as any).customQuestions;
+        stage.questionCount = (roundMatch.config as any).customQuestions.length;
+        (stage.config as any).isConfigured = true;
+      }
+    }
+
+    return stage;
+  }
+
+  /**
+   * Updates configuration, questions, pass threshold, and schedule for a pipeline stage.
+   */
+  public static async updateStageConfig(
+    jobId: string,
+    stageId: string,
+    recruiterUserId: string,
+    updateData: {
+      stageName?: string;
+      durationMinutes?: number;
+      passingScore?: number;
+      questionCount?: number;
+      deadlineHours?: number;
+      autoAdvanceScoreThreshold?: number;
+      schedule?: {
+        date?: string;
+        startTime?: string;
+        endTime?: string;
+        durationHours?: number | string;
+        durationFormatted?: string;
+      };
+      customQuestions?: any[];
+      config?: Record<string, unknown>;
+    }
+  ): Promise<{ success: boolean; stage: IFunnelStage }> {
+    const job = await this.verifyJobOwnership(jobId, recruiterUserId);
+    let config = await HiringFunnelConfigModel.findOne({ jobId });
+
+    if (!config) {
+      // Auto-initialize HiringFunnelConfig for this job
+      const round = job.assessment?.rounds?.find(
+        (r: any) => r.id === stageId || r.roundId === stageId || r.type === stageId
+      );
+      const stageName = updateData.stageName || round?.name || 'Assessment Stage';
+      const initialStage: IFunnelStage = {
+        stageId,
+        stageName,
+        stageType: 'assessment',
+        assessmentType: round?.type || 'general',
+        order: 1,
+        targetCount: 10,
+        expectedAttendanceRate: 1,
+        expectedPassRate: 0.6,
+        deadlineHours: updateData.deadlineHours || 48,
+        autoAdvanceScoreThreshold: updateData.autoAdvanceScoreThreshold ?? updateData.passingScore ?? 70,
+        autoRefillEnabled: true,
+        durationMinutes: updateData.durationMinutes || 30,
+        passingScore: updateData.passingScore || 70,
+        questionCount: updateData.customQuestions?.length || 0,
+        schedule: updateData.schedule,
+        config: {
+          isConfigured: true,
+          configuredAt: new Date().toISOString(),
+          customQuestions: updateData.customQuestions || [],
+          ...(updateData.config || {}),
+        },
+      };
+
+      config = new HiringFunnelConfigModel({
+        jobId: job._id,
+        orgId: job.orgId,
+        finalShortlistTarget: job.finalShortlistTarget || 10,
+        stages: [initialStage],
+        totalFunnelIntakeTarget: 10,
+        currentShortlistedCount: 0,
+        status: 'active',
+        lastCalculatedAt: new Date(),
+      });
+      await config.save();
+
+      job.hiringEngineConfigId = config._id as any;
+      job.hiringEngineEnabled = true;
+      await job.save();
+
+      return { success: true, stage: initialStage };
+    }
+
+    let stageIndex = config.stages.findIndex((s) => s.stageId === stageId);
+    let stage: IFunnelStage;
+
+    if (stageIndex === -1) {
+      const round = job.assessment?.rounds?.find(
+        (r: any) => r.id === stageId || r.roundId === stageId || r.type === stageId
+      );
+      stage = {
+        stageId,
+        stageName: updateData.stageName || round?.name || 'Assessment Stage',
+        stageType: 'assessment',
+        assessmentType: round?.type || 'general',
+        order: config.stages.length + 1,
+        targetCount: 10,
+        expectedAttendanceRate: 1,
+        expectedPassRate: 0.6,
+        deadlineHours: updateData.deadlineHours || 48,
+        autoAdvanceScoreThreshold: updateData.autoAdvanceScoreThreshold ?? updateData.passingScore ?? 70,
+        autoRefillEnabled: true,
+        durationMinutes: updateData.durationMinutes || 30,
+        passingScore: updateData.passingScore || 70,
+        questionCount: updateData.customQuestions?.length || 0,
+        schedule: updateData.schedule,
+        config: {
+          isConfigured: true,
+          configuredAt: new Date().toISOString(),
+          customQuestions: updateData.customQuestions || [],
+          ...(updateData.config || {}),
+        },
+      };
+      config.stages.push(stage);
+    } else {
+      stage = config.stages[stageIndex];
+      if (updateData.stageName) stage.stageName = updateData.stageName;
+      if (typeof updateData.durationMinutes === 'number') stage.durationMinutes = updateData.durationMinutes;
+      if (typeof updateData.passingScore === 'number') stage.passingScore = updateData.passingScore;
+      if (typeof updateData.questionCount === 'number') stage.questionCount = updateData.questionCount;
+      if (typeof updateData.deadlineHours === 'number') stage.deadlineHours = updateData.deadlineHours;
+      if (typeof updateData.autoAdvanceScoreThreshold === 'number') {
+        stage.autoAdvanceScoreThreshold = updateData.autoAdvanceScoreThreshold;
+      }
+      if (updateData.schedule) stage.schedule = updateData.schedule;
+
+      stage.config = stage.config || {};
+      if (updateData.customQuestions) {
+        stage.config.customQuestions = updateData.customQuestions;
+        stage.questionCount = updateData.customQuestions.length;
+      }
+      if (updateData.config) {
+        stage.config = { ...stage.config, ...updateData.config };
+      }
+      stage.config.isConfigured = true;
+      stage.config.configuredAt = new Date().toISOString();
+    }
+
+    config.markModified('stages');
+    await config.save();
+
+    // Also synchronize into JobModel.assessment.rounds if present
+    if (job.assessment?.rounds) {
+      const roundIdx = job.assessment.rounds.findIndex(
+        (r: any) =>
+          r.id === stageId ||
+          r.roundId === stageId ||
+          r.type === stage.assessmentType ||
+          r.roundType === stage.assessmentType
+      );
+      if (roundIdx !== -1) {
+        const round = job.assessment.rounds[roundIdx];
+        round.config = round.config || {};
+        if (typeof updateData.durationMinutes === 'number') {
+          (round.config as any).durationMinutes = updateData.durationMinutes;
+        }
+        if (typeof updateData.passingScore === 'number') {
+          (round.config as any).passingScore = updateData.passingScore;
+        }
+        if (updateData.customQuestions) {
+          (round.config as any).customQuestions = updateData.customQuestions;
+          (round.config as any).totalQuestions = updateData.customQuestions.length;
+          (round.config as any).isConfigured = true;
+        }
+        if (updateData.schedule) {
+          (round.config as any).schedule = updateData.schedule;
+        }
+        job.markModified('assessment.rounds');
+        await job.save();
+      }
+    }
+
+    return { success: true, stage };
   }
 }

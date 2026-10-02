@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HiringEngineService } from './services/hiringEngine.service.js';
 import { ApplicationCollectionService } from './services/applicationCollection.service.js';
+import { QuestionBankParserService } from './services/questionBankParser.service.js';
 import { AppError } from '../../utils/appError.js';
 
 export class HiringEngineController {
@@ -385,6 +386,113 @@ export class HiringEngineController {
         message: `Candidate final decision recorded as '${decision}'.`,
         timestamp: new Date().toISOString(),
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId
+   */
+  public static async getStageDetails(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const stageId = Array.isArray(req.params.stageId) ? req.params.stageId[0] : req.params.stageId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const stage = await HiringEngineService.getStageDetails(jobId, stageId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: stage,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PUT /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId
+   */
+  public static async updateStageConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const stageId = Array.isArray(req.params.stageId) ? req.params.stageId[0] : req.params.stageId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const result = await HiringEngineService.updateStageConfig(
+        jobId,
+        stageId,
+        recruiterUserId,
+        req.body
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Stage configuration updated successfully.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId/upload-questions
+   * Parses an uploaded file (xlsx, csv, json, pdf, docx) into structured MCQ questions.
+   */
+  public static async uploadStageQuestions(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const file = req.file;
+      if (!file) {
+        throw AppError.badRequest('No question bank file uploaded. Please attach a .xlsx, .csv, .json, .pdf, or .docx file.');
+      }
+
+      const result = await QuestionBankParserService.parseFile(
+        file.buffer,
+        file.originalname,
+        file.mimetype
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: `Successfully parsed ${result.totalQuestions} questions from ${file.originalname}`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/hiring-engine/sample-question-template
+   * Downloads a sample Excel or CSV template.
+   */
+  public static async downloadSampleTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const format = String(req.query.format || 'xlsx').toLowerCase();
+      if (format === 'csv') {
+        const csv = QuestionBankParserService.generateSampleCsv();
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="question_bank_template.csv"');
+        res.status(200).send(csv);
+      } else {
+        const buffer = await QuestionBankParserService.generateSampleExcelWorkbook();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="question_bank_template.xlsx"');
+        res.status(200).send(buffer);
+      }
     } catch (error) {
       next(error);
     }

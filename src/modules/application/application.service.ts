@@ -865,9 +865,28 @@ export class ApplicationService {
 
     // 2. Check stage.config.customQuestions or job.assessment.rounds
     if (!questions || questions.length === 0) {
-      const customQuestions =
+      let customQuestions =
         (stage.config as any)?.customQuestions ||
         job?.assessment?.rounds?.find((r: any) => r.id === roundId)?.config?.customQuestions;
+
+      if (!customQuestions || customQuestions.length === 0) {
+        const topics =
+          (stage.config as any)?.topics ||
+          job?.assessment?.rounds?.find((r: any) => r.id === roundId)?.config?.topics;
+        if (Array.isArray(topics) && topics.length > 0) {
+          customQuestions = topics.map((t: string, idx: number) => ({
+            id: `topic_${idx + 1}`,
+            order: idx + 1,
+            type: 'descriptive',
+            section: 'ai_interview',
+            question: t,
+            points: 10,
+            instructions: `AI Conversational Interview Question: ${t}`,
+            sampleAnswer: `The AI evaluates the candidate's conversational response based on depth, technical accuracy, and role requirements.`,
+            evaluationRubric: 'Concept Clarity: 25%, Technical Depth: 35%, Problem Solving: 25%, Communication: 15%',
+          }));
+        }
+      }
 
       if (Array.isArray(customQuestions) && customQuestions.length > 0) {
         const toInsert = customQuestions.map((cq: any, idx: number) => ({
@@ -1053,6 +1072,21 @@ export class ApplicationService {
       const customQ = (stage.config as any)?.customQuestions;
       if (Array.isArray(customQ) && customQ.length > 0) {
         questions = customQ as any;
+      } else {
+        const topics = (stage.config as any)?.topics;
+        if (Array.isArray(topics) && topics.length > 0) {
+          questions = topics.map((t: string, idx: number) => ({
+            id: `topic_${idx + 1}`,
+            order: idx + 1,
+            type: 'descriptive',
+            section: 'ai_interview',
+            question: t,
+            points: 10,
+            instructions: `AI Conversational Interview Question: ${t}`,
+            sampleAnswer: `Detailed technical response covering architecture, tradeoffs, and edge cases.`,
+            evaluationRubric: 'Concept Clarity: 25%, Technical Depth: 35%, Problem Solving: 25%, Communication: 15%',
+          })) as any;
+        }
       }
     }
 
@@ -1530,6 +1564,112 @@ export class ApplicationService {
             { id: 'opt_d', text: '4 nodes' },
           ],
           correctOptionId: 'opt_c',
+        },
+      ];
+    }
+
+    if (assessmentType === 'ai_voice' || assessmentType === 'voice_assessment') {
+      return [
+        {
+          question: `System Architecture Walkthrough: Verbally walk through your architectural decisions for designing a globally distributed real-time platform for ${jobTitle} utilizing ${skillList}. Explain trade-offs between WebSockets, SSE, and HTTP polling.`,
+          instructions: 'AI Voice Assessment — Verbal Systems Walkthrough & Communication',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Select WebSockets for bidirectional low-latency duplex messaging with heartbeat ping-pong' },
+            { id: 'opt_b', text: 'Select Server-Sent Events (SSE) for unidirectional streaming updates over HTTP/2' },
+            { id: 'opt_c', text: 'Use aggressive client polling with 500ms intervals' },
+            { id: 'opt_d', text: 'Batch all notifications to daily bulk email dispatch' },
+          ],
+          correctOptionId: 'opt_a',
+        },
+        {
+          question: 'Production Incident Triage: Imagine an active production outage where API latency spikes to 15 seconds and error rates surge to 40%. Verbally articulate your step-by-step triage protocol, containment, and executive communication.',
+          instructions: 'AI Voice Assessment — High-Pressure Incident Verbal Response',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Restart all cluster nodes immediately without taking memory dumps or checking metrics' },
+            { id: 'opt_b', text: 'Acknowledge incident, check telemetry for bottleneck layer, shed non-critical load via circuit breakers, and communicate transparent status updates' },
+            { id: 'opt_c', text: 'Mute alerts and wait for traffic to subside after peak hours' },
+            { id: 'opt_d', text: 'Roll forward with untested speculative patches directly on production' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Technical Leadership & Disagreements: Describe how you resolve a deadlock when two senior engineers strongly advocate for conflicting architectural designs. How do you lead them toward consensus?',
+          instructions: 'AI Voice Assessment — Verbal Leadership & Conflict Resolution',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Make an arbitrary unilateral decision to close the discussion quickly' },
+            { id: 'opt_b', text: 'Establish shared success criteria, run isolated proof-of-concept benchmarks, and facilitate an objective trade-off evaluation matrix' },
+            { id: 'opt_c', text: 'Allow whichever engineer has longer company tenure to make the call' },
+            { id: 'opt_d', text: 'Postpone the initiative indefinitely until unanimity occurs naturally' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Stakeholder Communication: How do you explain the technical debt and necessity of refactoring core legacy infrastructure to non-technical business executives?',
+          instructions: 'AI Voice Assessment — Verbal Translation of Tech to Business Value',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Cite complex compile-time metrics and dependency trees that executives cannot understand' },
+            { id: 'opt_b', text: 'Translate technical debt into business impact: development velocity, platform stability, security vulnerability, and ROI' },
+            { id: 'opt_c', text: 'Threaten team resignations if refactoring budget is not approved' },
+            { id: 'opt_d', text: 'Hide the refactoring inside unrelated feature delivery tasks' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+      ];
+    }
+
+    if (assessmentType === 'ai_chat' || assessmentType === 'chat_assessment') {
+      return [
+        {
+          question: `Design and implement a scalable State Management & Data Flow Architecture for high-concurrency client updates in ${skillList}, handling optimistic UI and race conditions.`,
+          instructions: 'AI Chat Assessment — Architecture & Code Design',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Global mutable singleton with unvalidated direct property mutation' },
+            { id: 'opt_b', text: 'Normalized immutable state store with optimistic rollback actions and request deduplication' },
+            { id: 'opt_c', text: 'Polling localStorage on a 50ms interval loop' },
+            { id: 'opt_d', text: 'Reloading the complete page on every state update event' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'API Contract & Query Optimization: How would you structure schema validation, pagination, and database indexing for high-frequency search and filtering endpoints?',
+          instructions: 'AI Chat Assessment — API Contracts & Database Performance',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Unindexed full table scans with offset-based pagination on billions of records' },
+            { id: 'opt_b', text: 'Strict runtime schema validation (Zod/Joi), keyset/cursor-based pagination, and composite B-tree indexing' },
+            { id: 'opt_c', text: 'Client-side filtering of unpaginated multi-gigabyte JSON payloads' },
+            { id: 'opt_d', text: 'Disabling schema validation to reduce serialization overhead' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Asynchronous Concurrency & Error Boundaries: How do you isolate failures in distributed background workers, prevent memory leaks, and guarantee idempotency in message queues?',
+          instructions: 'AI Chat Assessment — Distributed Fault Isolation',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Infinite unthrottled retries without backoff or poison-message dead lettering' },
+            { id: 'opt_b', text: 'Exponential backoff with jitter, dead-letter queues, idempotent processing tokens, and bounded worker pools' },
+            { id: 'opt_c', text: 'Suppressing all runtime exceptions silently' },
+            { id: 'opt_d', text: 'Holding open database connections across asynchronous sleeps' },
+          ],
+          correctOptionId: 'opt_b',
+        },
+        {
+          question: 'Production CI/CD Pipelines & Automated Testing: Outline an automated end-to-end testing matrix and canary deployment strategy to ensure zero-downtime releases.',
+          instructions: 'AI Chat Assessment — CI/CD Pipeline & Delivery Engineering',
+          points: 10,
+          options: [
+            { id: 'opt_a', text: 'Direct FTP file uploads to live production servers during peak business hours' },
+            { id: 'opt_b', text: 'Unit & integration test suites in CI, ephemeral preview environments, canary traffic shifting with automated metric rollback triggers' },
+            { id: 'opt_c', text: 'Manual testing on production after announcing maintenance downtime' },
+            { id: 'opt_d', text: 'Skipping test runs for emergency bug hotfixes' },
+          ],
+          correctOptionId: 'opt_b',
         },
       ];
     }

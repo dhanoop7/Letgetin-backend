@@ -285,6 +285,36 @@ export class DomainAssessmentController {
       next(err);
     }
   }
+
+  /**
+   * Candidate / Recruiter: Process dynamic AI Chat Assessment turn
+   */
+  public async chatTurn(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const result = await domainAssessmentService.processChatTurn(req.body);
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Candidate / Recruiter: Strictly evaluate full AI Chat Assessment session
+   */
+  public async evaluateChatSession(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const evaluation = await domainAssessmentService.evaluateChatSession(req.body);
+      res.status(200).json({
+        success: true,
+        data: evaluation,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 export const domainAssessmentController = new DomainAssessmentController();

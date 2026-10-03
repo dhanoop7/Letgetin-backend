@@ -859,6 +859,8 @@ export class JobService {
               let stageType: 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview' | 'custom' = 'assessment';
               if (
                 round.type === 'ai_assessment' ||
+                round.type === 'ai_chat' ||
+                round.type === 'ai_voice' ||
                 round.type === 'rapid_question' ||
                 round.type === 'screening_interview' ||
                 round.type === 'technical_interview'

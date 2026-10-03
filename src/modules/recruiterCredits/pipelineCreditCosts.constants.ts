@@ -21,6 +21,8 @@ export const PIPELINE_SUB_OPTIONS: Record<PipelineSection, PipelineSubOption[]> 
     { key: 'technical_test', label: 'Technical Test' },
     { key: 'rapid_round', label: 'Rapid Round' },
     { key: 'ai_assessment', label: 'AI Assessment' },
+    { key: 'ai_chat', label: 'AI Chat Assessment' },
+    { key: 'ai_voice', label: 'AI Voice Assessment' },
     { key: 'skills', label: 'Skills Assessment' },
     { key: 'technical', label: 'Technical Assessment' },
     { key: 'rapid_question', label: 'Rapid Question Round' },

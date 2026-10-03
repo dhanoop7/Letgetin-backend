@@ -18,6 +18,15 @@ router.post('/generate-round-questions', optionalAuthenticate, (req, res, next) 
   domainAssessmentController.generateRoundQuestions(req, res, next)
 );
 
+// AI Chat Assessment Live Conversational Engine
+router.post('/chat-turn', optionalAuthenticate, (req, res, next) =>
+  domainAssessmentController.chatTurn(req, res, next)
+);
+
+router.post('/evaluate-chat-session', optionalAuthenticate, (req, res, next) =>
+  domainAssessmentController.evaluateChatSession(req, res, next)
+);
+
 // Assessments CRUD
 router.post('/', optionalAuthenticate, (req, res, next) =>
   domainAssessmentController.createAssessment(req, res, next)

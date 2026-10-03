@@ -75,6 +75,8 @@ export const assessmentRoundTypeSchema = z.enum([
   'technical_test',
   'rapid_round',
   'ai_assessment',
+  'ai_chat',
+  'ai_voice',
   'domain',
   'skills',
   'technical',

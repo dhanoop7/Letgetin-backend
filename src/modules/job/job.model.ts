@@ -110,6 +110,8 @@ export type AssessmentRoundType =
   | 'technical_test'
   | 'rapid_round'
   | 'ai_assessment'
+  | 'ai_chat'
+  | 'ai_voice'
   | 'domain'
   | 'skills'
   | 'technical'
@@ -299,6 +301,8 @@ const AssessmentRoundSchema = new Schema<IAssessmentRoundConfig>(
         'technical_test',
         'rapid_round',
         'ai_assessment',
+        'ai_chat',
+        'ai_voice',
         'domain',
         'skills',
         'technical',

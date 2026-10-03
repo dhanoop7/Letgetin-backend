@@ -1594,6 +1594,10 @@ export class HiringEngineService {
         if (updateData.schedule) {
           (round.config as any).schedule = updateData.schedule;
         }
+        if (updateData.config) {
+          round.config = { ...(round.config as any), ...(updateData.config as any) };
+        }
+        (round.config as any).isConfigured = true;
         job.markModified('assessment.rounds');
         await job.save();
       }

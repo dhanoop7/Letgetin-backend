@@ -6,6 +6,8 @@ export const createResumeSchema = z.object({
     templateId: z.string().default('modern-sleek'),
     content: z.record(z.unknown()),
     settings: z.record(z.unknown()).optional(),
+    isVerified: z.boolean().optional(),
+    verifiedAt: z.string().or(z.date()).optional(),
   }),
 });
 
@@ -18,6 +20,8 @@ export const updateResumeSchema = z.object({
     templateId: z.string().optional(),
     content: z.record(z.unknown()).optional(),
     settings: z.record(z.unknown()).optional(),
+    isVerified: z.boolean().optional(),
+    verifiedAt: z.string().or(z.date()).optional(),
   }),
 });
 

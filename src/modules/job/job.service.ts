@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, AssessmentRoundType, ILinguisticTestConfig, IPsychometricGeniusTestConfig } from './job.model.js';
+import { JobModel, WorkplaceType, EmploymentType, ExperienceLevel, IJobAssessmentConfig, AssessmentRoundType, ILinguisticTestConfig, IPsychometricGeniusTestConfig } from './job.model.js';
+import { normalizeAssessmentConfiguration, DEFAULT_ASSESSMENT_NAMES } from './assessmentConfig.utils.js';
 import { CandidateProfileModel, ICandidateProfileDocument } from './candidateProfile.model.js';
 import { RecruiterOrgRepository } from '../recruiterOrg/recruiterOrg.repository.js';
 import { ResumeModel } from '../resume/resume.model.js';
@@ -676,6 +677,23 @@ export class JobService {
   async createRecruiterJob(userId: string, data: RecruiterJobInput): Promise<any> {
     const org = await new RecruiterOrgRepository().findByOwnerUserId(userId);
     const isDraft = !!data.saveAsDraft;
+
+    // Normalize assessment configuration
+    const normalizedAssessment = data.assessment
+      ? normalizeAssessmentConfiguration(data.assessment)
+      : (data.pipelineOptions?.assessment && Array.isArray(data.pipelineOptions.assessmentTypes) && data.pipelineOptions.assessmentTypes.length > 0)
+      ? normalizeAssessmentConfiguration({
+          enabled: true,
+          rounds: data.pipelineOptions.assessmentTypes.map((t, idx) => ({
+            id: `round_${t}`,
+            type: t as any,
+            order: idx + 1,
+            name: DEFAULT_ASSESSMENT_NAMES[t as keyof typeof DEFAULT_ASSESSMENT_NAMES] || `${t} Assessment`,
+            enabled: true,
+          })),
+        })
+      : undefined;
+
     // Selection is persisted regardless of draft/publish so a draft can be resumed later —
     // only the credit charge itself is gated on actually publishing.
     const pipelineSelection = {
@@ -758,6 +776,7 @@ export class JobService {
       sanitizedPipeline?.assessment ||
       sanitizedPipeline?.aiInterview ||
       sanitizedPipeline?.humanInterview ||
+      (normalizedAssessment?.enabled && normalizedAssessment.rounds.length > 0) ||
       (Array.isArray(data.rounds) && data.rounds.length > 0) ||
       (Array.isArray(data.stages) && data.stages.length > 0)
     );
@@ -1141,6 +1160,7 @@ export interface RecruiterJobInput {
   autoStartEnabled?: boolean;
   rounds?: string[];
   stages?: any[];
+  assessment?: IJobAssessmentConfig;
   pipelineOptions?: {
     matchVolume?: string | null;
     resumeMatch?: boolean;

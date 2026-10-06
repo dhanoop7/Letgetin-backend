@@ -14,9 +14,13 @@ export const PIPELINE_SUB_OPTIONS: Record<PipelineSection, PipelineSubOption[]> 
     { key: 'semanticAi', label: 'Semantic AI Match' },
   ],
   assessment: [
-    { key: 'basicAptitude', label: 'Basic Aptitude' },
+    { key: 'general', label: 'General Assessment' },
     { key: 'coding', label: 'Coding Assessment' },
+    { key: 'basicAptitude', label: 'Basic Aptitude' },
     { key: 'domain', label: 'Domain Assessment' },
+    { key: 'mcq', label: 'MCQ Assessment' },
+    { key: 'short_answer', label: 'Short Answer Assessment' },
+    { key: 'scenario', label: 'Scenario-Based Assessment' },
     { key: 'general_aptitude', label: 'General Aptitude' },
     { key: 'technical_test', label: 'Technical Test' },
     { key: 'rapid_round', label: 'Rapid Round' },
@@ -97,6 +101,8 @@ export interface PipelineSelection {
   humanInterview?: boolean;
   humanInterviewTypes?: string[];
   roundOrder?: string[];
+  listAsJob?: boolean;
+  featuredJob?: boolean;
   listInLandingPage?: boolean;
   listInRecentlyPosted?: boolean;
   videoSchedule?: any;
@@ -114,6 +120,8 @@ export interface SanitizedPipelineOptions {
   humanInterview?: boolean;
   humanInterviewTypes?: string[];
   roundOrder?: string[];
+  listAsJob?: boolean;
+  featuredJob?: boolean;
   listInLandingPage?: boolean;
   listInRecentlyPosted?: boolean;
 }
@@ -164,6 +172,8 @@ export function sanitizePipelineSelection(input?: PipelineSelection): SanitizedP
     humanInterview: !!input?.humanInterview || humanInterviewTypes.length > 0,
     humanInterviewTypes,
     roundOrder,
+    listAsJob: !!input?.listAsJob,
+    featuredJob: !!input?.featuredJob,
     listInLandingPage: !!input?.listInLandingPage,
     listInRecentlyPosted: !!input?.listInRecentlyPosted,
   };

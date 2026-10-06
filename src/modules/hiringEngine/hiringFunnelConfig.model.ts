@@ -1,4 +1,5 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { AssessmentRoundType } from '../job/job.model.js';
 
 export type FunnelStageType = 'resume_match' | 'assessment' | 'ai_interview' | 'manual_review' | 'human_interview' | 'custom';
 export type FunnelConfigStatus = 'draft' | 'active' | 'completed' | 'paused';

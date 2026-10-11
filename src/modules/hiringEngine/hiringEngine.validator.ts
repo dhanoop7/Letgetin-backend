@@ -50,7 +50,7 @@ export const refillStageSchema = z.object({
 
 export const finalDecisionSchema = z.object({
   body: z.object({
-    decision: z.enum(['offered', 'on_hold', 'rejected']),
+    decision: z.enum(['offered', 'on_hold', 'on-hold', 'rejected']),
     notes: z.string().optional(),
   }),
 });

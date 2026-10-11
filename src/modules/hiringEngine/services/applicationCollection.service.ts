@@ -147,6 +147,32 @@ export class ApplicationCollectionService {
           autoRefillEnabled: true,
         };
       }
+      if (k.includes('final') || k.includes('shortlist')) {
+        return {
+          stageId: 'stage_final_shortlist',
+          stageName: 'Final Shortlist',
+          stageType: 'manual_review',
+          order,
+          expectedAttendanceRate: 1.0,
+          expectedPassRate: 0.8,
+          deadlineHours: 48,
+          autoAdvanceScoreThreshold: 75,
+          autoRefillEnabled: true,
+        };
+      }
+      if (k.includes('bgc') || k.includes('background') || k.includes('verification')) {
+        return {
+          stageId: 'stage_bgc',
+          stageName: 'Background Verification (BGC)',
+          stageType: 'manual_review',
+          order,
+          expectedAttendanceRate: 1.0,
+          expectedPassRate: 0.9,
+          deadlineHours: 72,
+          autoAdvanceScoreThreshold: 80,
+          autoRefillEnabled: true,
+        };
+      }
       return {
         stageId: `stage_${k}`,
         stageName: key,
@@ -184,7 +210,7 @@ export class ApplicationCollectionService {
       return stages;
     }
 
-    // Default 3-stage fallback only if absolutely nothing is specified
+    // Default 5 sequential hiring stages
     return [
       {
         stageId: 'stage_resume_screen',
@@ -216,6 +242,28 @@ export class ApplicationCollectionService {
         expectedAttendanceRate: 1.0,
         expectedPassRate: 0.5,
         deadlineHours: 48,
+        autoAdvanceScoreThreshold: 80,
+        autoRefillEnabled: true,
+      },
+      {
+        stageId: 'stage_final_shortlist',
+        stageName: 'Final Shortlist',
+        stageType: 'manual_review',
+        order: 4,
+        expectedAttendanceRate: 1.0,
+        expectedPassRate: 0.8,
+        deadlineHours: 48,
+        autoAdvanceScoreThreshold: 75,
+        autoRefillEnabled: true,
+      },
+      {
+        stageId: 'stage_bgc',
+        stageName: 'Background Verification (BGC)',
+        stageType: 'manual_review',
+        order: 5,
+        expectedAttendanceRate: 1.0,
+        expectedPassRate: 0.9,
+        deadlineHours: 72,
         autoAdvanceScoreThreshold: 80,
         autoRefillEnabled: true,
       },

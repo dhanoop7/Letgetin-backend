@@ -28,6 +28,16 @@ router.post('/config', validate(configureHiringPipelineSchema), HiringEngineCont
 router.get('/config', HiringEngineController.getPipelineConfig);
 router.get('/funnel-metrics', HiringEngineController.getFunnelMetrics);
 
+// Shortlist Pipeline & Stage Candidates (5 Sequential Stages)
+router.get('/shortlist', HiringEngineController.getShortlistSummary);
+router.get('/shortlist/summary', HiringEngineController.getShortlistSummary);
+router.get('/shortlist/:stageId/:status', HiringEngineController.getShortlistCandidates);
+router.get('/shortlist/:stageId', HiringEngineController.getShortlistCandidates);
+
+// Candidate Profile & Resume Inspection
+router.get('/candidates/:applicationId', HiringEngineController.getCandidateDetail);
+router.get('/candidates/:applicationId/resume', HiringEngineController.getCandidateResume);
+
 // Sample Question Bank Template (Excel or CSV)
 router.get('/sample-question-template', HiringEngineController.downloadSampleTemplate);
 
@@ -68,13 +78,31 @@ router.post('/stages/:stageId/refill', validate(refillStageSchema), HiringEngine
 // Candidate Stage Transition Audit History
 router.get('/candidates/:applicationId/history', HiringEngineController.getCandidateHistory);
 
-// Final Shortlist & Offer Management Layer
+// Final Shortlist / Finalist & Offer Management Layer
 router.get('/final-shortlist', HiringEngineController.getFinalShortlist);
+router.get('/final-shortlist/export', HiringEngineController.exportFinalShortlistScorecards);
+router.get('/final-shortlist/:applicationId', HiringEngineController.getFinalistCandidateDetail);
 router.post(
   '/final-shortlist/:applicationId/decision',
   validate(finalDecisionSchema),
   HiringEngineController.recordFinalDecision
 );
+router.post('/final-shortlist/:applicationId/offer', HiringEngineController.offerFinalist);
+router.post('/final-shortlist/:applicationId/hold', HiringEngineController.holdFinalist);
+router.post('/final-shortlist/:applicationId/reject', HiringEngineController.rejectFinalist);
+
+// Finalist Routes Aliases (/finalists)
+router.get('/finalists', HiringEngineController.getFinalShortlist);
+router.get('/finalists/export', HiringEngineController.exportFinalShortlistScorecards);
+router.get('/finalists/:applicationId', HiringEngineController.getFinalistCandidateDetail);
+router.post(
+  '/finalists/:applicationId/decision',
+  validate(finalDecisionSchema),
+  HiringEngineController.recordFinalDecision
+);
+router.post('/finalists/:applicationId/offer', HiringEngineController.offerFinalist);
+router.post('/finalists/:applicationId/hold', HiringEngineController.holdFinalist);
+router.post('/finalists/:applicationId/reject', HiringEngineController.rejectFinalist);
 
 // Application Collection & Adaptive Pipeline
 router.get('/application-collection', HiringEngineController.getApplicationCollection);

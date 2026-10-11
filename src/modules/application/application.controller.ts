@@ -78,6 +78,12 @@ export class ApplicationController {
     res.status(200).json({ success: true, data: applicants, timestamp: new Date().toISOString() });
   };
 
+  static getVerifiedResumesForRecruiter = async (req: Request, res: Response): Promise<void> => {
+    const jobId = req.query.jobId as string | undefined;
+    const resumes = await applicationService.getVerifiedResumesForRecruiter(req.user!.userId, jobId);
+    res.status(200).json({ success: true, data: resumes, timestamp: new Date().toISOString() });
+  };
+
   static getApplicantsForJob = async (req: Request, res: Response): Promise<void> => {
     const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
     const applicants = await applicationService.getApplicantsForJob(req.user!.userId, String(jobId));

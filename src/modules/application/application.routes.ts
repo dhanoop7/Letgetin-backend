@@ -17,6 +17,7 @@ router.delete('/:id', asyncHandler(ApplicationController.deleteApplication));
 
 // --- Recruiter applicant pipeline ---
 router.get('/recruiter/all', requireRole('recruiter'), asyncHandler(ApplicationController.getAllApplicantsForRecruiter));
+router.get('/recruiter/verified-resumes', requireRole('recruiter'), asyncHandler(ApplicationController.getVerifiedResumesForRecruiter));
 router.get('/job/:jobId', requireRole('recruiter'), asyncHandler(ApplicationController.getApplicantsForJob));
 router.patch('/:id/recruiter-status', requireRole('recruiter'), asyncHandler(ApplicationController.updateApplicantStatus));
 

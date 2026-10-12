@@ -1,10 +1,112 @@
 import { Request, Response } from 'express';
 import { AppError } from '../../utils/appError.js';
 import { InstitutionService } from './institution.service.js';
+import { InstitutionAdmissionService } from './institutionAdmission.service.js';
 
 const institutionService = new InstitutionService();
+const admissionService = new InstitutionAdmissionService();
 
 export class InstitutionController {
+  // ─── Admission Pipeline & Intakes ──────────────────────────────────────────
+
+  static listAdmissionTracks = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const tracks = await admissionService.listTracks(orgId);
+    res.status(200).json({ success: true, data: tracks, timestamp: new Date().toISOString() });
+  };
+
+  static createAdmissionTrack = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const track = await admissionService.createTrack(orgId, req.body);
+    res.status(201).json({
+      success: true,
+      data: track,
+      message: 'Admission track created successfully',
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static listAdmissionApplications = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const applications = await admissionService.listApplications(orgId, {
+      program: req.query.program as string | undefined,
+      stage: req.query.stage as string | undefined,
+      search: req.query.search as string | undefined,
+    });
+    res.status(200).json({ success: true, data: applications, timestamp: new Date().toISOString() });
+  };
+
+  static createAdmissionApplication = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const application = await admissionService.createApplication(orgId, req.body);
+    res.status(201).json({
+      success: true,
+      data: application,
+      message: 'Application registered successfully',
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static updateAdmissionStage = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const { stage, note } = req.body;
+    if (!stage) {
+      throw AppError.badRequest('New stage is required.');
+    }
+    const application = await admissionService.updateStage(orgId, req.params.id as string, stage, note);
+    res.status(200).json({
+      success: true,
+      data: application,
+      message: 'Stage updated successfully',
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static updateAdmissionApplication = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const application = await admissionService.updateApplication(orgId, req.params.id as string, req.body);
+    res.status(200).json({
+      success: true,
+      data: application,
+      message: 'Application updated successfully',
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static bulkIssueCallLetters = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const { applicantIds } = req.body;
+    if (!Array.isArray(applicantIds) || applicantIds.length === 0) {
+      throw AppError.badRequest('List of applicantIds is required.');
+    }
+    const result = await admissionService.bulkIssueCallLetters(orgId, applicantIds);
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: `Issued counseling letters to ${result.updatedCount} candidate(s)`,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static addAdmissionNote = async (req: Request, res: Response): Promise<void> => {
+    const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
+    const { note } = req.body;
+    if (!note || !note.trim()) {
+      throw AppError.badRequest('Note content is required.');
+    }
+    const application = await admissionService.addNote(
+      orgId,
+      req.params.id as string,
+      note,
+      req.user!.email || 'Admissions Officer'
+    );
+    res.status(200).json({
+      success: true,
+      data: application,
+      message: 'Note added successfully',
+      timestamp: new Date().toISOString(),
+    });
+  };
   static listStudents = async (req: Request, res: Response): Promise<void> => {
     const orgId = await institutionService.getInstitutionOrgId(req.user!.userId);
     const students = await institutionService.listStudents(orgId);

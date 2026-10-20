@@ -58,7 +58,7 @@ export class AuthService {
       isEmailVerified: true,
       phoneVerified: false,
       role: input.role || 'user',
-      entityType: input.role === 'recruiter' ? input.entityType : undefined,
+      entityType: input.role === 'recruiter' ? (input.entityType || 'company') : undefined,
     });
 
     // 6. Generate JWT Tokens
@@ -131,7 +131,7 @@ export class AuthService {
       isEmailVerified: false,
       phoneVerified: true,
       role: input.role || 'user',
-      entityType: input.role === 'recruiter' ? input.entityType : undefined,
+      entityType: input.role === 'recruiter' ? (input.entityType || 'company') : undefined,
     });
 
     // 6. Generate JWT Tokens

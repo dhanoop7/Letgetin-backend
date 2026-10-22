@@ -12,7 +12,7 @@ export interface IUserDocument extends Document {
   emailVerified: boolean;
   isEmailVerified?: boolean;
   phoneVerified: boolean;
-  role: 'user' | 'admin' | 'recruiter';
+  role: 'user' | 'admin' | 'recruiter' | 'Super Admin' | 'Admin' | 'Staff' | 'SUPER_ADMIN' | 'ADMIN' | 'STAFF' | 'USER' | string;
   entityType?: 'company' | 'institution' | 'startup';
   hasBuiltResume?: boolean;
   refreshTokenHash?: string | null;
@@ -35,8 +35,8 @@ const UserSchema = new Schema<IUserDocument>(
     emailVerified: { type: Boolean, default: false },
     isEmailVerified: { type: Boolean, default: false },
     phoneVerified: { type: Boolean, default: false },
-    role: { type: String, enum: ['user', 'admin', 'recruiter'], default: 'user' },
-    entityType: { type: String, enum: ['company', 'institution', 'startup'], default: undefined },
+    role: { type: String, default: 'user' },
+    entityType: { type: String, enum: ['company', 'institution', 'startup'], required: false },
     hasBuiltResume: { type: Boolean, default: false },
     refreshTokenHash: { type: String, default: null },
     previousRefreshTokenHash: { type: String, default: null },

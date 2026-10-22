@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AppError } from '../../utils/appError.js';
 import { InstitutionService } from './institution.service.js';
 import { InstitutionAdmissionService } from './institutionAdmission.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 const institutionService = new InstitutionService();
 const admissionService = new InstitutionAdmissionService();
@@ -37,6 +38,15 @@ export class InstitutionController {
   };
 
   static createAdmissionApplication = async (req: Request, res: Response): Promise<void> => {
+    // Placement - Mass Application: 2 credits per student application
+    await recruiterCreditsService.chargeForFeature(
+      req.user!.userId,
+      'inst_placement_mass_application',
+      2,
+      undefined,
+      'Institution Student Application'
+    );
+
     const orgId = await admissionService.getInstitutionOrgId(req.user!.userId);
     const application = await admissionService.createApplication(orgId, req.body);
     res.status(201).json({
@@ -191,6 +201,25 @@ export class InstitutionController {
   };
 
   static createEvent = async (req: Request, res: Response): Promise<void> => {
+    const title = (req.body?.title || '').toLowerCase();
+    let credits = 100;
+    let featureKey = 'inst_campus_drive';
+    if (title.includes('online')) {
+      credits = 150;
+      featureKey = 'inst_job_fair_online';
+    } else if (title.includes('fair') || title.includes('job fair')) {
+      credits = 300;
+      featureKey = 'inst_job_fair_campus';
+    }
+
+    await recruiterCreditsService.chargeForFeature(
+      req.user!.userId,
+      featureKey,
+      credits,
+      undefined,
+      `Institution Event (${req.body?.title || 'Campus Event'})`
+    );
+
     const orgId = await institutionService.getInstitutionOrgId(req.user!.userId);
     const event = await institutionService.createEvent(orgId, req.body);
     res.status(201).json({ success: true, data: event, message: 'Event added', timestamp: new Date().toISOString() });
@@ -251,6 +280,22 @@ export class InstitutionController {
   };
 
   static createTrainingProgram = async (req: Request, res: Response): Promise<void> => {
+    const title = (req.body?.title || req.body?.programName || '').toLowerCase();
+    let credits = 100;
+    let featureKey = 'inst_skills_enhancement_batch';
+    if (title.includes('career') || title.includes('counselling') || title.includes('enhancement')) {
+      credits = 50;
+      featureKey = 'inst_career_enhancement';
+    }
+
+    await recruiterCreditsService.chargeForFeature(
+      req.user!.userId,
+      featureKey,
+      credits,
+      undefined,
+      `Institution Training (${req.body?.title || 'Program'})`
+    );
+
     const orgId = await institutionService.getInstitutionOrgId(req.user!.userId);
     const program = await institutionService.createTrainingProgram(orgId, req.body);
     res.status(201).json({ success: true, data: program, message: 'Training program scheduled', timestamp: new Date().toISOString() });

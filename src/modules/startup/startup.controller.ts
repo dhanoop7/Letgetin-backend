@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { StartupService } from './startup.service.js';
+import { EcosystemApplicationModel } from './startup.model.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
+import { AppError } from '../../utils/appError.js';
 
 export class StartupController {
   public static async getFundraisingProfile(req: Request, res: Response): Promise<void> {
@@ -79,6 +83,14 @@ export class StartupController {
 
   public static async createPipelineDeal(req: Request, res: Response): Promise<void> {
     const userId = req.user!.userId;
+    // Server-side credit enforcement: Networking / Deal creation = 20 credits
+    await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_networking',
+      undefined,
+      'Fundraising Pipeline Deal / Investor Networking'
+    );
+
     const deal = await StartupService.createPipelineDeal(userId, req.body);
 
     res.status(201).json({
@@ -128,11 +140,211 @@ export class StartupController {
 
   public static async generateAIPersonalizedPitch(req: Request, res: Response): Promise<void> {
     const userId = req.user!.userId;
+    // Server-side credit enforcement: Startup Business Plus AI Pitch = 50 credits
+    await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_business_plus',
+      undefined,
+      'Startup AI Personalized Pitch'
+    );
+
     const pitch = await StartupService.generateAIPersonalizedPitch(userId, req.body);
 
     res.status(200).json({
       success: true,
       data: pitch,
+    });
+  }
+
+  public static async listEcosystemApplications(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const org = await StartupService.getOrCreateStartupOrg(userId);
+    const applications = await EcosystemApplicationModel.find({
+      startupOrgId: org._id,
+    }).sort({ createdAt: -1 }).lean();
+
+    res.status(200).json({
+      success: true,
+      data: applications,
+    });
+  }
+
+  public static async applyIncubation(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { incubatorName, facilities, city, deadline, link, notes } = req.body;
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_incubations',
+      undefined,
+      `Incubation Application Support: ${incubatorName || 'Incubator Program'}`
+    );
+
+    const org = await StartupService.getOrCreateStartupOrg(userId);
+    const application = await EcosystemApplicationModel.create({
+      startupOrgId: org._id,
+      ownerUserId: new Types.ObjectId(userId),
+      programType: 'incubator',
+      programName: incubatorName || 'Incubation Program',
+      status: 'Applied',
+      appliedAt: new Date(),
+      deadline: deadline || 'Active',
+      link: link || '',
+      notes: notes || (facilities ? `Requested facilities: ${facilities.join(', ')}` : 'Applied via LetGetIn Startup Hub'),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: application,
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Incubation support application submitted successfully',
+    });
+  }
+
+  public static async applyAccelerator(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { acceleratorName, cohort, focus, checkSize, deadline, link, notes } = req.body;
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_accelerators',
+      undefined,
+      `Accelerator Application Support: ${acceleratorName || 'Accelerator Program'}`
+    );
+
+    const org = await StartupService.getOrCreateStartupOrg(userId);
+    const application = await EcosystemApplicationModel.create({
+      startupOrgId: org._id,
+      ownerUserId: new Types.ObjectId(userId),
+      programType: 'accelerator',
+      programName: acceleratorName || 'Venture Accelerator',
+      status: 'Applied',
+      appliedAt: new Date(),
+      deadline: deadline || 'Active',
+      link: link || '',
+      notes: notes || `Cohort: ${cohort || 'Next Batch'} | Investment: ${checkSize || 'N/A'}`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: application,
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Accelerator application support initiated successfully',
+    });
+  }
+
+  public static async requestDocumentation(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { docType, title, notes } = req.body;
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_documentations',
+      undefined,
+      `Startup Documentation Service: ${title || docType || 'Legal & Pitch Documentation'}`
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        docType: docType || 'pitch_deck',
+        title: title || 'Executive Investor Documentation',
+        status: 'In Review',
+        requestedAt: new Date(),
+      },
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Documentation service request processed successfully',
+    });
+  }
+
+  public static async requestFundingSupport(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { supportType, targetAmount, notes } = req.body;
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_funding_support',
+      undefined,
+      `Funding Support Advisory Service: ${supportType || 'Capital Outreach'}`
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        supportType: supportType || 'fundraising_advisory',
+        targetAmount: targetAmount || 2000000,
+        status: 'Active Advisory',
+        requestedAt: new Date(),
+      },
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Funding support service activated successfully',
+    });
+  }
+
+  public static async requestBusinessPlus(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { packageType, sprintName } = req.body;
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      'startup_business_plus',
+      undefined,
+      `Business Plus Listing / Growth Sprint: ${sprintName || packageType || 'Growth Package'}`
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        packageType: packageType || 'business_plus_growth',
+        sprintName: sprintName || 'Product & Growth Sprint',
+        status: 'Activated',
+        activatedAt: new Date(),
+      },
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Business Plus package activated successfully',
+    });
+  }
+
+  public static async requestStartupService(req: Request, res: Response): Promise<void> {
+    const userId = req.user!.userId;
+    const { serviceKey, details } = req.body;
+
+    const validServices = [
+      'startup_business_plus',
+      'startup_documentations',
+      'startup_funding_support',
+      'startup_networking',
+      'startup_incubations',
+      'startup_accelerators',
+    ] as const;
+
+    if (!validServices.includes(serviceKey)) {
+      throw AppError.badRequest('Invalid startup service key requested');
+    }
+
+    const chargeResult = await recruiterCreditsService.chargeStartupFeature(
+      userId,
+      serviceKey,
+      undefined,
+      details?.reasonOverride || `Startup Service: ${serviceKey}`
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        serviceKey,
+        details: details || {},
+        status: 'Completed',
+        processedAt: new Date(),
+      },
+      balance: chargeResult.balance,
+      creditsDeducted: chargeResult.cost,
+      message: 'Startup service requested and credits deducted successfully',
     });
   }
 }

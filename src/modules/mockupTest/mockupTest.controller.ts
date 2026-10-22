@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { MockupTestService } from './mockupTest.service.js';
 import { AppError } from '../../utils/appError.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 export class MockupTestController {
   /**
@@ -31,6 +32,11 @@ export class MockupTestController {
       res.status(statusCode).json({
         success: false,
         message: err?.message || 'Unable to generate AI questions. Please try again.',
+        error: {
+          code: err?.code || 'GENERATE_ERROR',
+          message: err?.message,
+          details: err?.details || null,
+        },
       });
     }
   }
@@ -43,6 +49,30 @@ export class MockupTestController {
     try {
       const { testType, mode, jobDescription, assessmentType, interactionMode } = req.body;
       const userId = req.user?.userId;
+
+      // Server-side credit charge if user is authenticated
+      if (userId) {
+        let featureKey = 'mockup_assessment';
+        let credits = 20;
+        if (assessmentType === 'psychometric') {
+          featureKey = 'psychometric_test';
+          credits = 10;
+        } else if (assessmentType === 'genius') {
+          featureKey = 'genius_test';
+          credits = 10;
+        } else if (assessmentType === 'linguistic') {
+          featureKey = 'linguistic_test';
+          credits = 10;
+        }
+
+        await recruiterCreditsService.chargeForFeature(
+          userId,
+          featureKey,
+          credits,
+          undefined,
+          `Assessment Session (${featureKey})`
+        );
+      }
 
       const effectiveTestType = testType || (assessmentType?.includes('coding') || assessmentType?.includes('system') || assessmentType?.includes('domain') ? 'technical' : 'aptitude');
       const effectiveMode = mode || 'objective';
@@ -79,6 +109,11 @@ export class MockupTestController {
       res.status(statusCode).json({
         success: false,
         message: err?.message || 'Unable to generate AI questions. Please try again.',
+        error: {
+          code: err?.code || 'SESSION_ERROR',
+          message: err?.message,
+          details: err?.details || null,
+        },
       });
     }
   }

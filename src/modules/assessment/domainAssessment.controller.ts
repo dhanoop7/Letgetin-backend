@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { domainAssessmentService } from './domainAssessment.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 const getParamId = (param: string | string[] | undefined): string => {
   if (Array.isArray(param)) return param[0] || '';
@@ -150,6 +151,14 @@ export class DomainAssessmentController {
   public async publishAssessment(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const id = getParamId(req.params.id);
+      if (req.user?.userId) {
+        // Enforce Domain Check charge: 20 credits (₹200)
+        await recruiterCreditsService.chargeForFeature(
+          req.user.userId,
+          'domain_check',
+          { refId: id, reasonOverride: 'Published Domain Assessment Check' }
+        );
+      }
       const published = await domainAssessmentService.publishAssessment(id);
       res.status(200).json({
         success: true,

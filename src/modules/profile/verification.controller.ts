@@ -5,6 +5,7 @@ import { CloudinaryService } from '../../services/cloudinary.service.js';
 import { DocumentParserService } from '../../services/documentParser.service.js';
 import { GeminiVerificationService } from '../../services/geminiVerification.service.js';
 import { AppError } from '../../utils/appError.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 function normalizeCloudinaryUrl(url: string, mimeType: string = '', originalName: string = ''): string {
   if (!url || typeof url !== 'string') return url;
@@ -177,6 +178,15 @@ export class VerificationController {
       if (!section || !validSections.includes(section as SectionType)) {
         throw AppError.badRequest(`Invalid section. Must be one of: ${validSections.join(', ')}`);
       }
+
+      // Server-side credit enforcement: Verified Resume = 30 credits
+      await recruiterCreditsService.chargeForFeature(
+        userId,
+        'verified_resume',
+        30,
+        undefined,
+        `Profile Verification: ${section}`
+      );
 
       // Security Check: Allowed mime types
       const allowedMimes = [

@@ -6,6 +6,7 @@ import { AppError } from '../../utils/appError.js';
 import { IUserDocument } from '../user/user.model.js';
 import { OtpService } from './services/otp.service.js';
 import { GoogleService } from './services/google.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 export interface AuthTokens {
   accessToken: string;
@@ -60,6 +61,13 @@ export class AuthService {
       role: input.role || 'user',
       entityType: input.role === 'recruiter' ? (input.entityType || 'company') : undefined,
     });
+
+    // Award exactly 20 promotional credits on new account registration (idempotent, once per account)
+    try {
+      await recruiterCreditsService.getOrCreateCredits({ userId: user._id.toString() });
+    } catch (creditErr) {
+      console.error('[AuthService] Error awarding initial signup credits:', creditErr);
+    }
 
     // 6. Generate JWT Tokens
     const payload: TokenPayload = {
@@ -133,6 +141,13 @@ export class AuthService {
       role: input.role || 'user',
       entityType: input.role === 'recruiter' ? (input.entityType || 'company') : undefined,
     });
+
+    // Award exactly 20 promotional credits on new account registration (idempotent, once per account)
+    try {
+      await recruiterCreditsService.getOrCreateCredits({ userId: user._id.toString() });
+    } catch (creditErr) {
+      console.error('[AuthService] Error awarding initial signup credits:', creditErr);
+    }
 
     // 6. Generate JWT Tokens
     const payload: TokenPayload = {
@@ -231,6 +246,13 @@ export class AuthService {
         avatarUrl: googleProfile.picture || undefined,
         role: 'user',
       });
+
+      // Award exactly 20 promotional credits on new account registration (idempotent, once per account)
+      try {
+        await recruiterCreditsService.getOrCreateCredits({ userId: user._id.toString() });
+      } catch (creditErr) {
+        console.error('[AuthService] Error awarding initial signup credits:', creditErr);
+      }
     }
 
     const payload: TokenPayload = {

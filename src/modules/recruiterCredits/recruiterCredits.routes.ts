@@ -10,7 +10,12 @@ const router = Router();
 router.use(authenticate, requireRole('recruiter'));
 
 router.get('/credits', asyncHandler(RecruiterCreditsController.getCredits));
+router.get('/credits/wallet', asyncHandler(RecruiterCreditsController.getUserWallet));
 router.post('/credits/purchase', validate(purchaseCreditsSchema), asyncHandler(RecruiterCreditsController.purchaseCredits));
+router.post('/credits/order', asyncHandler(RecruiterCreditsController.createPaymentOrder));
+router.post('/credits/verify', asyncHandler(RecruiterCreditsController.verifyPayment));
+router.post('/credits/referral', asyncHandler(RecruiterCreditsController.claimReferral));
+
 router.post(
   '/candidates/:userId/reveal-contact',
   validate(revealContactSchema),

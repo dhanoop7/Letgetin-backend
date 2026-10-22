@@ -26,4 +26,13 @@ router.post('/pipeline/:id/activity', StartupController.addDealActivity);
 // AI Personalized Pitch Generator
 router.post('/ai/personalized-pitch', StartupController.generateAIPersonalizedPitch);
 
+// Ecosystem & Startup Services (6 Startup Feature Actions)
+router.get('/services/applications', StartupController.listEcosystemApplications);
+router.post('/services/request', StartupController.requestStartupService);
+router.post('/incubations/apply', StartupController.applyIncubation);
+router.post('/accelerators/apply', StartupController.applyAccelerator);
+router.post('/documentations/request', StartupController.requestDocumentation);
+router.post('/funding-support/request', StartupController.requestFundingSupport);
+router.post('/business-plus/request', StartupController.requestBusinessPlus);
+
 export default router;

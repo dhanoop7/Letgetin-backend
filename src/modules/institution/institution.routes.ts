@@ -32,6 +32,16 @@ const router = Router();
 
 router.use(authenticate, requireRole('recruiter'));
 
+// ─── Admission Pipeline Routes ─────────────────────────────────────────────
+router.get('/admission/tracks', asyncHandler(InstitutionController.listAdmissionTracks));
+router.post('/admission/tracks', asyncHandler(InstitutionController.createAdmissionTrack));
+router.get('/admission/applications', asyncHandler(InstitutionController.listAdmissionApplications));
+router.post('/admission/applications', asyncHandler(InstitutionController.createAdmissionApplication));
+router.patch('/admission/applications/:id/stage', asyncHandler(InstitutionController.updateAdmissionStage));
+router.patch('/admission/applications/:id', asyncHandler(InstitutionController.updateAdmissionApplication));
+router.post('/admission/applications/bulk-call-letters', asyncHandler(InstitutionController.bulkIssueCallLetters));
+router.post('/admission/applications/:id/notes', asyncHandler(InstitutionController.addAdmissionNote));
+
 router.get('/overview', asyncHandler(InstitutionController.getOverview));
 
 router.get('/students', asyncHandler(InstitutionController.listStudents));

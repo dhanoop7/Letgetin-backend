@@ -13,7 +13,12 @@ export class DocumentParserService {
   /**
    * Extracts searchable text from PDF or DOCX, or marks as image/scanned for Gemini Vision
    */
-  static async extractText(fileBuffer: Buffer, mimeType: string): Promise<ExtractedDocumentResult> {
+  static async extractText(
+    fileBuffer: Buffer,
+    mimeType: string,
+    filename?: string
+  ): Promise<ExtractedDocumentResult> {
+    const ext = filename?.split('.').pop()?.toLowerCase() || '';
     const isImage = mimeType.startsWith('image/') || mimeType.includes('heic');
 
     if (isImage) {
@@ -24,48 +29,72 @@ export class DocumentParserService {
       };
     }
 
+    const isDocx =
+      ext === 'docx' ||
+      ext === 'doc' ||
+      mimeType.includes('word') ||
+      mimeType.includes('officedocument') ||
+      mimeType === 'application/msword' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
     // Handle DOCX files using mammoth
-    if (
-      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      mimeType === 'application/msword'
-    ) {
+    if (isDocx) {
       try {
         const result = await mammoth.extractRawText({ buffer: fileBuffer });
+        const text = result.value ? result.value.trim() : '';
         return {
-          text: result.value ? result.value.trim() : '',
-          isImageOrScanned: false,
-          mimeType,
+          text,
+          isImageOrScanned: text.length < 20,
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         };
       } catch (err) {
-        console.warn('DOCX extraction warning:', err);
-        return { text: '', isImageOrScanned: true, mimeType };
+        console.warn('DOCX extraction warning, attempting fallback:', err);
       }
     }
 
-    // Handle PDF files using pdf-parse
-    if (mimeType === 'application/pdf') {
+    const isPdf =
+      ext === 'pdf' ||
+      mimeType === 'application/pdf' ||
+      fileBuffer.slice(0, 5).toString('utf-8').includes('%PDF');
+
+    // Handle PDF files using pdf-parse with pdfjs-dist fallback
+    if (isPdf) {
+      // 1. First attempt with pdf-parse
       try {
         const data = await (pdfParse as any)(fileBuffer);
         const text = data.text ? data.text.trim() : '';
-
-        // If text length is very short, it's likely a scanned image PDF
-        if (text.length < 30) {
+        if (text.length >= 30) {
           return {
-            text: '',
-            isImageOrScanned: true,
-            mimeType,
+            text,
+            isImageOrScanned: false,
+            mimeType: 'application/pdf',
           };
         }
-
-        return {
-          text,
-          isImageOrScanned: false,
-          mimeType,
-        };
       } catch (err) {
-        console.warn('PDF parsing error, passing to Gemini Vision:', err);
-        return { text: '', isImageOrScanned: true, mimeType };
+        console.warn('pdf-parse failed, falling back to pdfjs-dist:', err);
       }
+
+      // 2. Fallback attempt with TextExtractionService (pdfjs-dist)
+      try {
+        const { TextExtractionService } = await import('../modules/import/text-extraction.service.js');
+        const extractor = new TextExtractionService();
+        const text = await extractor.extractTextFromBuffer(fileBuffer, 'pdf');
+        if (text && text.trim().length >= 20) {
+          return {
+            text: text.trim(),
+            isImageOrScanned: false,
+            mimeType: 'application/pdf',
+          };
+        }
+      } catch (err) {
+        console.warn('pdfjs-dist extraction fallback warning:', err);
+      }
+
+      return {
+        text: '',
+        isImageOrScanned: true,
+        mimeType: 'application/pdf',
+      };
     }
 
     return {

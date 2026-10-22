@@ -78,6 +78,12 @@ export class ApplicationController {
     res.status(200).json({ success: true, data: applicants, timestamp: new Date().toISOString() });
   };
 
+  static getVerifiedResumesForRecruiter = async (req: Request, res: Response): Promise<void> => {
+    const jobId = req.query.jobId as string | undefined;
+    const resumes = await applicationService.getVerifiedResumesForRecruiter(req.user!.userId, jobId);
+    res.status(200).json({ success: true, data: resumes, timestamp: new Date().toISOString() });
+  };
+
   static getApplicantsForJob = async (req: Request, res: Response): Promise<void> => {
     const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
     const applicants = await applicationService.getApplicantsForJob(req.user!.userId, String(jobId));
@@ -115,6 +121,29 @@ export class ApplicationController {
     res.status(200).json({
       success: true,
       data: tracking,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static getStageTest = async (req: Request, res: Response): Promise<void> => {
+    const applicationId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const stageId = req.query.stageId as string | undefined;
+    const testData = await applicationService.getStageTest(req.user!.userId, String(applicationId), stageId);
+
+    res.status(200).json({
+      success: true,
+      data: testData,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  static submitStageAttempt = async (req: Request, res: Response): Promise<void> => {
+    const applicationId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const result = await applicationService.submitStageAttempt(req.user!.userId, String(applicationId), req.body);
+
+    res.status(200).json({
+      success: true,
+      data: result,
       timestamp: new Date().toISOString(),
     });
   };

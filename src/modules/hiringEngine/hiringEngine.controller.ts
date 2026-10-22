@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HiringEngineService } from './services/hiringEngine.service.js';
 import { ApplicationCollectionService } from './services/applicationCollection.service.js';
+import { QuestionBankParserService } from './services/questionBankParser.service.js';
 import { AppError } from '../../utils/appError.js';
 
 export class HiringEngineController {
@@ -78,8 +79,60 @@ export class HiringEngineController {
   }
 
   /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/shortlist
+   * Retrieves the 5-stage shortlist metrics, counts, and ratios for a job.
+   */
+  public static async getShortlistSummary(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Authentication required');
+
+      const jobId = req.params.jobId as string;
+      const summary = await HiringEngineService.getShortlistSummary(jobId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: summary,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/shortlist/:stageId/:status
+   * Retrieves strictly shortlisted OR eliminated candidates for a specific stage.
+   */
+  public static async getShortlistCandidates(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Authentication required');
+
+      const jobId = req.params.jobId as string;
+      const stageId = (req.params.stageId || req.params.stage) as string;
+      const status = (req.params.status || req.query.status || 'shortlisted') as string;
+
+      const result = await HiringEngineService.getShortlistStageCandidates(
+        jobId,
+        stageId,
+        status,
+        recruiterUserId
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * GET /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId/candidates
-   * Lists primary and reserve candidates for a specific stage.
+   * Lists primary and reserve candidates for a specific stage, with optional status filtering.
    */
   public static async getStageCandidates(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -88,12 +141,76 @@ export class HiringEngineController {
 
       const jobId = req.params.jobId as string;
       const stageId = req.params.stageId as string;
+      const statusFilter = req.query.status as string | undefined;
+
+      if (statusFilter && (statusFilter === 'shortlisted' || statusFilter === 'eliminated')) {
+        const result = await HiringEngineService.getShortlistStageCandidates(
+          jobId,
+          stageId,
+          statusFilter,
+          recruiterUserId
+        );
+        res.status(200).json({
+          success: true,
+          data: result,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
 
       const candidates = await HiringEngineService.getStageCandidates(jobId, stageId, recruiterUserId);
 
       res.status(200).json({
         success: true,
         data: candidates,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/candidates/:applicationId
+   * Retrieves candidate profile, evaluation history, and application details for the recruiter.
+   */
+  public static async getCandidateDetail(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Authentication required');
+
+      const jobId = req.params.jobId as string;
+      const applicationId = req.params.applicationId as string;
+
+      const candidate = await HiringEngineService.getCandidateDetail(jobId, applicationId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: candidate,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/candidates/:applicationId/resume
+   * Retrieves the candidate's resume for the recruiter.
+   */
+  public static async getCandidateResume(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Authentication required');
+
+      const jobId = req.params.jobId as string;
+      const applicationId = req.params.applicationId as string;
+
+      const resume = await HiringEngineService.getCandidateResume(jobId, applicationId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: { resume },
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -330,7 +447,7 @@ export class HiringEngineController {
 
   /**
    * GET /jobs/:jobId/final-shortlist
-   * Returns ONLY candidates who have actually completed the final configured funnel stage and reached final shortlist.
+   * Returns finalists for a job, supporting status tab filtering (?status=...) and search query (?search=...).
    */
   public static async getFinalShortlist(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
@@ -341,13 +458,80 @@ export class HiringEngineController {
         throw AppError.unauthorized('Recruiter authentication required.');
       }
 
-      const result = await HiringEngineService.getFinalShortlistCandidates(jobId, recruiterUserId);
+      const status = (req.query.status || req.query.decision) as string | undefined;
+      const search = req.query.search as string | undefined;
+
+      const result = await HiringEngineService.getFinalShortlistCandidates(jobId, recruiterUserId, {
+        status,
+        search,
+      });
 
       res.status(200).json({
         success: true,
         data: result,
         timestamp: new Date().toISOString(),
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /jobs/:jobId/final-shortlist/:applicationId
+   * Retrieves single finalist candidate scorecards, evaluation history, and details.
+   */
+  public static async getFinalistCandidateDetail(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const applicationId = Array.isArray(req.params.applicationId)
+        ? req.params.applicationId[0]
+        : req.params.applicationId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const candidate = await HiringEngineService.getFinalistDetail(jobId, applicationId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: candidate,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /jobs/:jobId/final-shortlist/export?format=csv|json
+   * Exports scorecard and evaluation summaries for finalists.
+   */
+  public static async exportFinalShortlistScorecards(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const format = String(req.query.format || 'csv').toLowerCase() as 'csv' | 'json';
+      const result = await HiringEngineService.exportFinalShortlistScorecards(jobId, recruiterUserId, format);
+
+      if (result.format === 'csv') {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+        res.status(200).send(result.data);
+      } else {
+        res.status(200).json({
+          success: true,
+          data: result.data,
+          filename: result.filename,
+          timestamp: new Date().toISOString(),
+        });
+      }
     } catch (error) {
       next(error);
     }
@@ -385,6 +569,191 @@ export class HiringEngineController {
         message: `Candidate final decision recorded as '${decision}'.`,
         timestamp: new Date().toISOString(),
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /jobs/:jobId/final-shortlist/:applicationId/offer
+   */
+  public static async offerFinalist(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const applicationId = Array.isArray(req.params.applicationId)
+        ? req.params.applicationId[0]
+        : req.params.applicationId;
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Recruiter authentication required.');
+
+      const { notes } = req.body || {};
+      const result = await HiringEngineService.recordFinalDecision(jobId, applicationId, recruiterUserId, 'offered', notes);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Offer extended to finalist successfully.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /jobs/:jobId/final-shortlist/:applicationId/hold
+   */
+  public static async holdFinalist(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const applicationId = Array.isArray(req.params.applicationId)
+        ? req.params.applicationId[0]
+        : req.params.applicationId;
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Recruiter authentication required.');
+
+      const { notes } = req.body || {};
+      const result = await HiringEngineService.recordFinalDecision(jobId, applicationId, recruiterUserId, 'on_hold', notes);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Finalist status updated to On Hold.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /jobs/:jobId/final-shortlist/:applicationId/reject
+   */
+  public static async rejectFinalist(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const applicationId = Array.isArray(req.params.applicationId)
+        ? req.params.applicationId[0]
+        : req.params.applicationId;
+      const recruiterUserId = req.user?.userId;
+      if (!recruiterUserId) throw AppError.unauthorized('Recruiter authentication required.');
+
+      const { notes } = req.body || {};
+      const result = await HiringEngineService.recordFinalDecision(jobId, applicationId, recruiterUserId, 'rejected', notes);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Finalist marked as rejected.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId
+   */
+  public static async getStageDetails(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const stageId = Array.isArray(req.params.stageId) ? req.params.stageId[0] : req.params.stageId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const stage = await HiringEngineService.getStageDetails(jobId, stageId, recruiterUserId);
+
+      res.status(200).json({
+        success: true,
+        data: stage,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PUT /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId
+   */
+  public static async updateStageConfig(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+      const stageId = Array.isArray(req.params.stageId) ? req.params.stageId[0] : req.params.stageId;
+      const recruiterUserId = req.user?.userId;
+
+      if (!recruiterUserId) {
+        throw AppError.unauthorized('Recruiter authentication required.');
+      }
+
+      const result = await HiringEngineService.updateStageConfig(
+        jobId,
+        stageId,
+        recruiterUserId,
+        req.body
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: 'Stage configuration updated successfully.',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/recruiter/jobs/:jobId/hiring-engine/stages/:stageId/upload-questions
+   * Parses an uploaded file (xlsx, csv, json, pdf, docx) into structured MCQ questions.
+   */
+  public static async uploadStageQuestions(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const file = req.file;
+      if (!file) {
+        throw AppError.badRequest('No question bank file uploaded. Please attach a .xlsx, .csv, .json, .pdf, or .docx file.');
+      }
+
+      const result = await QuestionBankParserService.parseFile(
+        file.buffer,
+        file.originalname,
+        file.mimetype
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: `Successfully parsed ${result.totalQuestions} questions from ${file.originalname}`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/recruiter/jobs/hiring-engine/sample-question-template
+   * Downloads a sample Excel or CSV template.
+   */
+  public static async downloadSampleTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const format = String(req.query.format || 'xlsx').toLowerCase();
+      if (format === 'csv') {
+        const csv = QuestionBankParserService.generateSampleCsv();
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename="question_bank_template.csv"');
+        res.status(200).send(csv);
+      } else {
+        const buffer = await QuestionBankParserService.generateSampleExcelWorkbook();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="question_bank_template.xlsx"');
+        res.status(200).send(buffer);
+      }
     } catch (error) {
       next(error);
     }

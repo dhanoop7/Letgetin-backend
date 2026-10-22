@@ -144,6 +144,7 @@ export class HiringPoolManager {
         await scheduleCandidateDeadlineCheck(String(jobId), String(app._id), firstStageId, deadlineHours);
         HiringNotificationHook.notifyCandidateInvited({
           candidateId: String(app.userId),
+          applicationId: String(app._id),
           jobId: String(jobId),
           jobTitle: job.title || 'Role',
           stageId: firstStageId,
@@ -255,6 +256,7 @@ export class HiringPoolManager {
       // Notify through pluggable notification hook
       HiringNotificationHook.notifyCandidateInvited({
         candidateId: String(candidateToPromote.userId),
+        applicationId: String(candidateToPromote._id),
         jobId: String(candidateToPromote.jobId),
         jobTitle: job?.title || 'Job Role',
         stageId,

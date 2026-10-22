@@ -9,12 +9,15 @@ router.use(authenticate);
 
 router.get('/', asyncHandler(ApplicationController.getApplications));
 router.get('/:id/tracking', asyncHandler(ApplicationController.getApplicationTracking));
+router.get('/:id/stage-test', asyncHandler(ApplicationController.getStageTest));
+router.post('/:id/submit-stage', asyncHandler(ApplicationController.submitStageAttempt));
 router.post('/', asyncHandler(ApplicationController.createApplication));
 router.patch('/:id/status', asyncHandler(ApplicationController.updateStatus));
 router.delete('/:id', asyncHandler(ApplicationController.deleteApplication));
 
 // --- Recruiter applicant pipeline ---
 router.get('/recruiter/all', requireRole('recruiter'), asyncHandler(ApplicationController.getAllApplicantsForRecruiter));
+router.get('/recruiter/verified-resumes', requireRole('recruiter'), asyncHandler(ApplicationController.getVerifiedResumesForRecruiter));
 router.get('/job/:jobId', requireRole('recruiter'), asyncHandler(ApplicationController.getApplicantsForJob));
 router.patch('/:id/recruiter-status', requireRole('recruiter'), asyncHandler(ApplicationController.updateApplicantStatus));
 

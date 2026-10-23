@@ -1,5 +1,10 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { aiApplyService } from './aiApply.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
+import { UserSubscriptionModel } from '../recruiterCredits/recruiterCredits.model.js';
+import { FEATURE_PRICING } from '../../config/pricing.config.js';
+import { AppError } from '../../utils/appError.js';
 
 export class AiApplyController {
   static getPreferences = async (req: Request, res: Response): Promise<void> => {
@@ -43,6 +48,76 @@ export class AiApplyController {
 
   static startBatchApply = async (req: Request, res: Response): Promise<void> => {
     const { jobIds, limit, batchSize } = req.body || {};
+    const totalCount = Array.isArray(jobIds) && jobIds.length > 0 ? jobIds.length : (limit || 10);
+    const userId = req.user!.userId;
+    const now = new Date();
+
+    // Check for an active, non-expired AI Apply package with remaining quota
+    const activePackage = await UserSubscriptionModel.findOne({
+      userId,
+      packageType: 'ai_apply',
+      status: 'active',
+      expiresAt: { $gt: now },
+      quotaRemaining: { $gt: 0 },
+    }).sort({ expiresAt: 1 });
+
+    if (activePackage) {
+      if (totalCount > (activePackage.quotaRemaining || 0)) {
+        throw AppError.badRequest(
+          `Your active package has ${activePackage.quotaRemaining} applications remaining, but ${totalCount} jobs were requested. Please select up to ${activePackage.quotaRemaining} jobs or activate an additional package.`
+        );
+      }
+      activePackage.quotaUsed = (activePackage.quotaUsed || 0) + totalCount;
+      activePackage.quotaRemaining = (activePackage.quotaRemaining || 0) - totalCount;
+      await activePackage.save();
+    } else {
+      // Determine required package tier
+      let creditCost = 20;
+      let featureKey = 'ai_apply_10jobs_1day';
+      let packageQuota = 10;
+      let durationDays = 1;
+
+      if (totalCount > 20) {
+        creditCost = 50;
+        featureKey = 'ai_apply_50jobs_10days';
+        packageQuota = 50;
+        durationDays = 10;
+      } else if (totalCount > 10) {
+        creditCost = 40;
+        featureKey = 'ai_apply_20jobs_7days';
+        packageQuota = 20;
+        durationDays = 7;
+      }
+
+      // Server-side credit enforcement
+      await recruiterCreditsService.chargeForFeature(
+        userId,
+        featureKey,
+        creditCost,
+        undefined,
+        `AI Auto-Apply package (${packageQuota} jobs / ${durationDays} days)`
+      );
+
+      // Record active package with remaining quota
+      const startDate = new Date();
+      const expiresAt = new Date(startDate.getTime() + durationDays * 24 * 3600 * 1000);
+      await UserSubscriptionModel.create({
+        userId: new mongoose.Types.ObjectId(userId),
+        planId: featureKey,
+        planName: FEATURE_PRICING[featureKey]?.name || `AI Apply — ${packageQuota} jobs`,
+        billingCycle: `${durationDays}_days`,
+        creditsIncluded: creditCost,
+        priceInr: creditCost * 10,
+        quotaTotal: packageQuota,
+        quotaUsed: totalCount,
+        quotaRemaining: Math.max(0, packageQuota - totalCount),
+        packageType: 'ai_apply',
+        startDate,
+        expiresAt,
+        status: 'active',
+      });
+    }
+
     const result = await aiApplyService.startBatchApply(req.user!.userId, {
       jobIds,
       limit,

@@ -1,11 +1,22 @@
 import { Request, Response } from 'express';
 import { TailoringService } from './tailoring.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 const tailoringService = new TailoringService();
 
 export class TailoringController {
   static create = async (req: Request, res: Response): Promise<void> => {
     const { resumeId, jobDescription } = req.body;
+
+    // Server-side credit enforcement: ATS Resume = 30 credits
+    await recruiterCreditsService.chargeForFeature(
+      req.user!.userId,
+      'ats_resume',
+      30,
+      undefined,
+      'ATS Resume Optimization'
+    );
+
     const session = await tailoringService.createSession(req.user!.userId, resumeId, jobDescription);
     res.status(201).json({
       success: true,

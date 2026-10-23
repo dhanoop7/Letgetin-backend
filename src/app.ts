@@ -20,6 +20,7 @@ import videoProfileRoutes from './modules/videoProfile/videoProfile.routes.js';
 import tailoringRoutes from './modules/tailoring/tailoring.routes.js';
 import recruiterOrgRoutes from './modules/recruiterOrg/recruiterOrg.routes.js';
 import recruiterCreditsRoutes from './modules/recruiterCredits/recruiterCredits.routes.js';
+import creditsRoutes from './modules/recruiterCredits/credits.routes.js';
 import institutionRoutes from './modules/institution/institution.routes.js';
 import taskRoutes from './modules/task/task.routes.js';
 import noteRoutes from './modules/note/note.routes.js';
@@ -38,10 +39,7 @@ export const createApp = (): Express => {
   // Trust proxy for secure cookies and accurate client IP extraction behind reverse proxies (Nginx, Render, Vercel, Fly.io, Cloudflare)
   app.set('trust proxy', 1);
 
-  // Security headers
-  app.use(helmet());
-
-  // CORS configuration
+  // CORS configuration (mounted before security headers to ensure proper CORS headers on all responses)
   const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -84,6 +82,13 @@ export const createApp = (): Express => {
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
 
+  // Security headers — disable crossOriginResourcePolicy so helmet does not block cross-origin frontend fetches
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: false,
+    })
+  );
+
   // Centralized HTTP Request & Correlation Logging (mounts early)
   app.use(httpLogger);
 
@@ -120,6 +125,7 @@ export const createApp = (): Express => {
   app.use('/api/recruiter/huremaso', huremasoRoutes);
   app.use('/api/recruiter', recruiterOrgRoutes);
   app.use('/api/recruiter', recruiterCreditsRoutes);
+  app.use('/api/credits', creditsRoutes);
   app.use('/api/institution', institutionRoutes);
   app.use('/api/tasks', taskRoutes);
   app.use('/api/notes', noteRoutes);

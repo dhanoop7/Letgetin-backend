@@ -714,7 +714,18 @@ export class JobService {
     if (!isDraft && creditsCost > 0 && org) {
       const balance = await recruiterCreditsService.getBalanceForOrg(org._id.toString());
       if (balance < creditsCost) {
-        throw AppError.badRequest('Insufficient credits. Please buy more credits.');
+        throw new AppError(
+          `Insufficient credits. This feature requires ${creditsCost} credits, but your balance is ${balance} credits. Purchase additional credits to continue.`,
+          402,
+          'INSUFFICIENT_CREDITS',
+          {
+            requiredCredits: creditsCost,
+            availableBalance: balance,
+            shortfall: Math.max(0, creditsCost - balance),
+            feature: 'job_posting',
+            returnUrl: '/recruiter/jobs/create',
+          }
+        );
       }
     }
 

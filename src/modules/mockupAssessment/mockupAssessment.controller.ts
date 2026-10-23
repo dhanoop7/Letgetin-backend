@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { MockupAssessmentService } from './mockupAssessment.service.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 export class MockupAssessmentController {
   /**
@@ -10,6 +11,16 @@ export class MockupAssessmentController {
     try {
       const { assessmentType, interactionMode, jobDescription } = req.body;
       const userId = req.user?.userId;
+
+      if (userId) {
+        await recruiterCreditsService.chargeForFeature(
+          userId,
+          'mockup_assessment',
+          20,
+          undefined,
+          `Mockup Assessment (${assessmentType || 'general'})`
+        );
+      }
 
       const result = await MockupAssessmentService.generateAssessmentQuestions({
         assessmentType,

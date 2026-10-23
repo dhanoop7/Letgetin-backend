@@ -97,7 +97,14 @@ export class RecruiterOrgService {
       }
       return updated;
     }
-    return await this.repository.create({ ...payload, ownerUserId: ownerUserId as any });
+    const newOrg = await this.repository.create({ ...payload, ownerUserId: ownerUserId as any });
+    try {
+      await RecruiterCreditsModel.updateOne(
+        { userId: ownerUserId },
+        { $set: { orgId: newOrg._id } }
+      );
+    } catch {}
+    return newOrg;
   }
 
   /**

@@ -102,6 +102,7 @@ export interface PipelineSelection {
   humanInterviewTypes?: string[];
   roundOrder?: string[];
   listAsJob?: boolean;
+  premiumJob?: boolean;
   featuredJob?: boolean;
   listInLandingPage?: boolean;
   listInRecentlyPosted?: boolean;
@@ -121,6 +122,7 @@ export interface SanitizedPipelineOptions {
   humanInterviewTypes?: string[];
   roundOrder?: string[];
   listAsJob?: boolean;
+  premiumJob?: boolean;
   featuredJob?: boolean;
   listInLandingPage?: boolean;
   listInRecentlyPosted?: boolean;
@@ -173,6 +175,7 @@ export function sanitizePipelineSelection(input?: PipelineSelection): SanitizedP
     humanInterviewTypes,
     roundOrder,
     listAsJob: !!input?.listAsJob,
+    premiumJob: !!input?.premiumJob,
     featuredJob: !!input?.featuredJob,
     listInLandingPage: !!input?.listInLandingPage,
     listInRecentlyPosted: !!input?.listInRecentlyPosted,
@@ -186,9 +189,14 @@ export function computePipelineCreditsCost(input?: PipelineSelection): number {
     sanitized.resumeMatchTypes.length + sanitized.assessmentTypes.length + sanitized.aiInterviewTypes.length;
   let totalCost = matchVolumeCost + subOptionCount * SUB_OPTION_CREDIT_COST;
   if (sanitized.checkResumeVerification) totalCost += 10;
-  if (sanitized.listAsJob) totalCost += 10;
-  if (sanitized.featuredJob) totalCost += 10;
-  if (sanitized.listInLandingPage) totalCost += 10;
-  if (sanitized.listInRecentlyPosted) totalCost += 10;
+  if (sanitized.premiumJob) {
+    totalCost += 20; // Create Job Posting — PremiumS: 20 credits (₹200)
+  } else if (sanitized.listAsJob) {
+    totalCost += 10; // Create Job Posting — Standard: 10 credits (₹100)
+  }
+  if (sanitized.featuredJob) totalCost += 30; // Featured Jobs per placement: 30 credits
+  if (sanitized.listInLandingPage) totalCost += 50; // List on landing pages: 50 credits
+  if (sanitized.listInRecentlyPosted) totalCost += 10; // Recently Posted: 10 credits
   return totalCost;
 }
+

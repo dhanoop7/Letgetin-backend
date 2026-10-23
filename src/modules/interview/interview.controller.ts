@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { InterviewService } from './interview.service.js';
 import { InterviewStage } from './interview.model.js';
+import { recruiterCreditsService } from '../recruiterCredits/recruiterCredits.service.js';
 
 export class InterviewController {
   public static async listInterviews(req: Request, res: Response): Promise<void> {
@@ -36,6 +37,15 @@ export class InterviewController {
 
   public static async createInterview(req: Request, res: Response): Promise<void> {
     const userId = req.user!.userId;
+    // Server-side credit verification: Mockup Interview requires 20 credits
+    await recruiterCreditsService.chargeForFeature(
+      userId,
+      'mockup_interview',
+      20,
+      undefined,
+      'Mockup Interview Scheduling'
+    );
+
     const interview = await InterviewService.createInterview(userId, req.body);
 
     res.status(201).json({

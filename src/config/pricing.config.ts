@@ -1006,7 +1006,7 @@ export interface StartupCategoryGroup {
   items: StartupPlanItem[];
 }
 
-export const STARTUP_SUBSCRIPTION_IDS = ['job_posting', 'hrms', 'startup'];
+export const STARTUP_SUBSCRIPTION_IDS = ['job_posting', 'hrms', 'recruitment_suite', 'startup'];
 
 export const STARTUP_PLAN_CATEGORIES: StartupCategoryGroup[] = [
   {
@@ -1368,7 +1368,7 @@ export interface InstitutionCategoryGroup {
   items: InstitutionPlanItem[];
 }
 
-export const INSTITUTION_SUBSCRIPTION_IDS = ['institution'];
+export const INSTITUTION_SUBSCRIPTION_IDS = ['job_posting', 'hrms', 'recruitment_suite', 'institution'];
 
 export const INSTITUTION_PLAN_CATEGORIES: InstitutionCategoryGroup[] = [
   {

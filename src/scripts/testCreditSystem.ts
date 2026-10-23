@@ -528,14 +528,14 @@ async function runCreditSystemTests() {
     );
 
     assert(
-      startupWallet.pricingCatalog.subscriptionPlans.length === 3,
-      'Startup account receives exactly 3 subscription plans (Job Posting, HRMS, and Startup)',
+      startupWallet.pricingCatalog.subscriptionPlans.length === 4,
+      'Startup account receives exactly 4 subscription plans (Job Posting, HRMS, Recruitment Suite, and Startup)',
       startupWallet.pricingCatalog.subscriptionPlans.map((s) => s.id)
     );
     const startupSubIds = startupWallet.pricingCatalog.subscriptionPlans.map((s) => s.id);
     assert(
-      startupSubIds.includes('job_posting') && startupSubIds.includes('hrms') && startupSubIds.includes('startup'),
-      'Startup subscription plans include job_posting, hrms, and startup',
+      startupSubIds.includes('job_posting') && startupSubIds.includes('hrms') && startupSubIds.includes('recruitment_suite') && startupSubIds.includes('startup'),
+      'Startup subscription plans include job_posting, hrms, recruitment_suite, and startup',
       startupSubIds
     );
 
@@ -752,12 +752,12 @@ async function runCreditSystemTests() {
       startupInsufficientErr?.details
     );
 
-    // Startup cannot purchase Recruitment Suite
+    // Startup cannot purchase Institution subscription
     let startupCrossRoleErr: any = null;
     try {
       await recruiterCreditsService.createPaymentOrder(
         testStartupUserId,
-        { purchaseType: 'subscription', itemKey: 'recruitment_suite' },
+        { purchaseType: 'subscription', itemKey: 'institution' },
         'startup'
       );
     } catch (err: any) {
@@ -765,7 +765,7 @@ async function runCreditSystemTests() {
     }
     assert(
       startupCrossRoleErr !== null && startupCrossRoleErr.statusCode === 400,
-      'Startup cannot purchase recruitment_suite subscriptions',
+      'Startup cannot purchase institution subscriptions',
       startupCrossRoleErr?.message
     );
 
@@ -801,18 +801,45 @@ async function runCreditSystemTests() {
     );
 
     assert(
-      instWallet.pricingCatalog.subscriptionPlans.length === 1,
-      'Institution account receives exactly 1 subscription plan (Institution)',
+      instWallet.pricingCatalog.subscriptionPlans.length === 4,
+      'Institution account receives exactly 4 subscription plans (Job Posting, HRMS, Recruitment Suite, Institution)',
       instWallet.pricingCatalog.subscriptionPlans.map((s) => s.id)
     );
-    const instSub = instWallet.pricingCatalog.subscriptionPlans[0];
+    const instSub = instWallet.pricingCatalog.subscriptionPlans.find((s) => s.id === 'institution')!;
     assert(
-      instSub.id === 'institution',
-      'Institution subscription plan ID is "institution"',
-      instSub.id
+      instSub !== undefined,
+      'Institution subscription plan ID "institution" is present',
+      instSub
     );
 
-    // Verify Institution subscription tiers: 100 / 500 / 1000 credits
+    // Verify all 4 Institution subscription plans and pricing
+    const jobPostingSub = instWallet.pricingCatalog.subscriptionPlans.find((s) => s.id === 'job_posting')!;
+    assert(
+      jobPostingSub.durations.monthly.credits === 50 && jobPostingSub.durations.monthly.priceInr === 500 &&
+      jobPostingSub.durations.six_months.credits === 250 && jobPostingSub.durations.six_months.priceInr === 2500 &&
+      jobPostingSub.durations.yearly.credits === 500 && jobPostingSub.durations.yearly.priceInr === 5000,
+      'Job Posting durations: 50 cr / ₹500 (mo), 250 cr / ₹2,500 (6 mo), 500 cr / ₹5,000 (yr)',
+      jobPostingSub.durations
+    );
+
+    const hrmsSub = instWallet.pricingCatalog.subscriptionPlans.find((s) => s.id === 'hrms')!;
+    assert(
+      hrmsSub.durations.monthly.credits === 150 && hrmsSub.durations.monthly.priceInr === 1500 &&
+      hrmsSub.durations.six_months.credits === 750 && hrmsSub.durations.six_months.priceInr === 7500 &&
+      hrmsSub.durations.yearly.credits === 1500 && hrmsSub.durations.yearly.priceInr === 15000,
+      'HRMS durations: 150 cr / ₹1,500 (mo), 750 cr / ₹7,500 (6 mo), 1,500 cr / ₹15,000 (yr)',
+      hrmsSub.durations
+    );
+
+    const recruitmentSuiteSub = instWallet.pricingCatalog.subscriptionPlans.find((s) => s.id === 'recruitment_suite')!;
+    assert(
+      recruitmentSuiteSub.durations.monthly.credits === 250 && recruitmentSuiteSub.durations.monthly.priceInr === 2500 &&
+      recruitmentSuiteSub.durations.six_months.credits === 1250 && recruitmentSuiteSub.durations.six_months.priceInr === 12500 &&
+      recruitmentSuiteSub.durations.yearly.credits === 2500 && recruitmentSuiteSub.durations.yearly.priceInr === 25000,
+      'Recruitment Suite durations: 250 cr / ₹2,500 (mo), 1,250 cr / ₹12,500 (6 mo), 2,500 cr / ₹25,000 (yr)',
+      recruitmentSuiteSub.durations
+    );
+
     assert(
       instSub.durations.monthly.credits === 100 && instSub.durations.monthly.priceInr === 1000 &&
       instSub.durations.six_months.credits === 500 && instSub.durations.six_months.priceInr === 5000 &&

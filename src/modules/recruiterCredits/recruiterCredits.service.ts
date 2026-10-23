@@ -94,6 +94,8 @@ export class RecruiterCreditsService {
     startupPlans?: any[];
     institutionPlans?: any[];
     subscriptionPlans?: any[];
+    paymentsCreditsEnabled?: boolean;
+    paymentsCreditsDisabledReason?: string;
   }> {
     try {
       const config = await mongoose.connection.db?.collection('creditpricingconfigs').findOne({ key: 'default' });
@@ -108,6 +110,8 @@ export class RecruiterCreditsService {
           startupPlans: config.startupPlans && config.startupPlans.length ? config.startupPlans : undefined,
           institutionPlans: config.institutionPlans && config.institutionPlans.length ? config.institutionPlans : undefined,
           subscriptionPlans: config.subscriptionPlans && config.subscriptionPlans.length ? config.subscriptionPlans : undefined,
+          paymentsCreditsEnabled: config.paymentsCreditsEnabled !== undefined ? Boolean(config.paymentsCreditsEnabled) : true,
+          paymentsCreditsDisabledReason: config.paymentsCreditsDisabledReason || '',
         };
       }
     } catch {
@@ -118,7 +122,28 @@ export class RecruiterCreditsService {
       featurePricing: FEATURE_PRICING,
       initialPromotionalCredits: INITIAL_PROMOTIONAL_CREDITS,
       referralRewardCredits: REFERRAL_REWARD_CREDITS,
+      paymentsCreditsEnabled: true,
+      paymentsCreditsDisabledReason: '',
     };
+  }
+
+  /**
+   * Authoritative platform check for Payments & Credits Kill Switch.
+   * If disabled by Super Admin, all new purchases, top-ups, paid subscriptions, and credit deductions are blocked.
+   */
+  async isPaymentsCreditsEnabled(): Promise<{ enabled: boolean; reason?: string }> {
+    try {
+      const config = await mongoose.connection.db?.collection('creditpricingconfigs').findOne({ key: 'default' });
+      if (config && config.paymentsCreditsEnabled === false) {
+        return {
+          enabled: false,
+          reason: config.paymentsCreditsDisabledReason || 'Payments and credit operations are temporarily disabled platform-wide by administration.',
+        };
+      }
+    } catch {
+      // Safe fallback: allow operations if database config cannot be checked
+    }
+    return { enabled: true };
   }
 
   /**
@@ -250,6 +275,8 @@ export class RecruiterCreditsService {
     balance: number;
     referralCode?: string;
     promotionalGranted: boolean;
+    paymentsCreditsEnabled?: boolean;
+    paymentsCreditsDisabledReason?: string;
     subscriptions: any[];
     packages: any[];
     transactions: any[];
@@ -262,6 +289,8 @@ export class RecruiterCreditsService {
       companyPlans?: typeof COMPANY_PLAN_CATEGORIES;
       startupPlans?: typeof STARTUP_PLAN_CATEGORIES;
       institutionPlans?: typeof INSTITUTION_PLAN_CATEGORIES;
+      paymentsCreditsEnabled?: boolean;
+      paymentsCreditsDisabledReason?: string;
     };
   }> {
     const owner = await this.resolveOwner(userId);
@@ -302,10 +331,10 @@ export class RecruiterCreditsService {
     if (isCandidate) {
       subscriptionPlans = [];
     } else if (isInstitution) {
-      // Institution accounts strictly only see the Institution subscription plan (Monthly ₹1000, 6 Months ₹5000, Yearly ₹10000)
+      // Institution accounts see Job Posting, HRMS, Recruitment Suite, and Institution subscription plans
       subscriptionPlans = baseSubscriptionPlans.filter((s: any) => INSTITUTION_SUBSCRIPTION_IDS.includes(s.id));
     } else if (isStartup) {
-      // Startup accounts strictly see the Startup, Job Posting, and HRMS subscription plans
+      // Startup accounts see Job Posting, HRMS, Recruitment Suite, and Startup subscription plans
       subscriptionPlans = baseSubscriptionPlans.filter((s: any) => STARTUP_SUBSCRIPTION_IDS.includes(s.id));
     } else if (isCompany) {
       // Company accounts strictly only see the 3 approved company subscription categories
@@ -321,6 +350,8 @@ export class RecruiterCreditsService {
       balance: credits.balance,
       referralCode: credits.referralCode,
       promotionalGranted: !!credits.promotionalGranted,
+      paymentsCreditsEnabled: authPricing.paymentsCreditsEnabled !== false,
+      paymentsCreditsDisabledReason: authPricing.paymentsCreditsDisabledReason || '',
       subscriptions,
       packages: isCandidate ? candidatePackages : (isInstitution ? institutionPackages : (isStartup ? startupPackages : (isCompany ? companyPackages : []))),
       transactions,
@@ -333,6 +364,8 @@ export class RecruiterCreditsService {
         companyPlans: isCompany ? (authPricing.companyPlans || COMPANY_PLAN_CATEGORIES) : undefined,
         startupPlans: isStartup ? (authPricing.startupPlans || STARTUP_PLAN_CATEGORIES) : undefined,
         institutionPlans: isInstitution ? (authPricing.institutionPlans || INSTITUTION_PLAN_CATEGORIES) : undefined,
+        paymentsCreditsEnabled: authPricing.paymentsCreditsEnabled !== false,
+        paymentsCreditsDisabledReason: authPricing.paymentsCreditsDisabledReason || '',
       },
     };
   }
@@ -363,6 +396,15 @@ export class RecruiterCreditsService {
     feature?: string,
     refId?: unknown
   ): Promise<{ balance: number }> {
+    const status = await this.isPaymentsCreditsEnabled();
+    if (!status.enabled) {
+      throw new AppError(
+        status.reason || 'Payments and credit operations are temporarily disabled platform-wide by administration.',
+        403,
+        'PAYMENTS_CREDITS_DISABLED'
+      );
+    }
+
     const resolvedOwner = typeof owner === 'string' ? await this.resolveOwner(owner) : owner;
 
     if (amount <= 0) {
@@ -572,6 +614,15 @@ export class RecruiterCreditsService {
     purchaseType: string;
     keyId?: string;
   }> {
+    const status = await this.isPaymentsCreditsEnabled();
+    if (!status.enabled) {
+      throw new AppError(
+        status.reason || 'Payments and credit operations are temporarily disabled platform-wide by administration.',
+        403,
+        'PAYMENTS_CREDITS_DISABLED'
+      );
+    }
+
     const user = await UserModel.findById(userId).select('role entityType').lean();
     const effectiveRole = role || user?.role || 'user';
     const org = await this.orgRepository.findByOwnerUserId(userId);
@@ -588,10 +639,10 @@ export class RecruiterCreditsService {
         throw AppError.forbidden('Enterprise subscriptions are only available to business accounts');
       }
       if (isInstitution && !INSTITUTION_SUBSCRIPTION_IDS.includes(params.itemKey)) {
-        throw AppError.badRequest('Invalid subscription plan for institution account. Only Institution subscription plan is supported.');
+        throw AppError.badRequest('Invalid subscription plan for institution account. Only Job Posting, HRMS, Recruitment Suite, and Institution subscription plans are supported.');
       }
       if (isStartup && !STARTUP_SUBSCRIPTION_IDS.includes(params.itemKey)) {
-        throw AppError.badRequest('Invalid subscription plan for startup account. Only Startup subscription plans are supported.');
+        throw AppError.badRequest('Invalid subscription plan for startup account. Only Job Posting, HRMS, Recruitment Suite, and Startup subscription plans are supported.');
       }
       if (isCompany && !COMPANY_SUBSCRIPTION_IDS.includes(params.itemKey)) {
         throw AppError.badRequest('Invalid subscription plan for company account. Only Job Posting, HRMS, and Recruitment Suite are supported.');
